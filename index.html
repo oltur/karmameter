@@ -1,0 +1,14 @@
+<html>
+<head>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+</head>
+<body>
+Response from service:
+<div id='div1'></div>
+    <script>
+ $.ajax({url: "//karmameter.work/api/", success: function(result){
+        $("#div1").html(result);
+    }});
+    </script>
+</body>
+</html>
