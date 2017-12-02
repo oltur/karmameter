@@ -1,4 +1,5 @@
 import LocationProvider from './location-provider'
+import HomePage from '../components/routes/home/HomePage'
 
 export default class Map {
 
@@ -41,6 +42,9 @@ export default class Map {
 
         this.service = new google.maps.places.PlacesService(this.map);
         this.service.nearbySearch(request, this.callback.bind(this));
+        this.infowindow = new google.maps.InfoWindow({
+            content: ""
+        });
     }
 
     callback(results, status) {
@@ -59,9 +63,12 @@ export default class Map {
             position: place.geometry.location,
         });
 
-        google.maps.event.addListener(marker, 'click', function () {
-            infowindow.setContent(place.name);
-            infowindow.open(map, this);
+        const content = `<button onclick="window.HomePage.showOverlay(true,'${place.name.replace(/\'/g, "\\\'")}')" >${place.name}</button>`;
+
+        google.maps.event.addListener(marker, 'click', () => {
+            this.infowindow.setContent(content);
+            this.infowindow.open(this.map, marker);
+            //HomePage.Instance.showOverlay(true);
         });
     }
 }
