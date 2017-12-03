@@ -31,7 +31,12 @@ export default class Map {
 
         this.map = new google.maps.Map(this.elem, {
             center: this.position,
-            zoom: 15
+            zoom: 15,
+            mapTypeControl: true,
+            mapTypeControlOptions: {
+                style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+                position: google.maps.ControlPosition.LEFT_BOTTOM,
+            },
         });
 
         var request = {
@@ -63,7 +68,7 @@ export default class Map {
             position: place.geometry.location,
         });
 
-        const content = `<button onclick="window.HomePage.showOverlay(true,'${place.name.replace(/\'/g, "\\\'")}')" >${place.name}</button>`;
+        const content = `<a href="#" onclick="window.HomePage.showOverlay(true,'${place.name.replace(/\'/g, "\\\'")}'); return false;" >${place.name}</button>`;
 
         google.maps.event.addListener(marker, 'click', () => {
             this.infowindow.setContent(content);
