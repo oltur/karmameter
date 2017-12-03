@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom';
 import { GoogleLogin, GoogleLogout } from 'react-google-login';
 import Button from 'components/ui/Button/Button';
 
+import Paper from 'material-ui/Paper';
+import Menu from 'material-ui/Menu';
+import MenuItem from 'material-ui/MenuItem';
+
 import $ from 'jquery';
 
 import Map from '../../../tools/map';
@@ -66,7 +70,7 @@ export default class HomePage extends React.Component {
     this.updateWindowDimensions();
     window.HomePage = this;
     //    window.initMap = window.HomePage.initMap;
-    this.loadJS('https://maps.googleapis.com/maps/api/js?key=AIzaSyBjBVO0J-a0PT30d-9lieKa9ygFnN8J1GA&libraries=places&callback=HomePage.initMap');
+    this.loadJS('https://maps.googleapis.com/maps/api/js?key=AIzaSyDtTQcbBh4TJUoJJZQMZMxHeRWGxjUVJ30&libraries=places&callback=HomePage.initMap');
     window.addEventListener('resize', this.updateWindowDimensions);
 
     document.addEventListener("keydown", this.keyDownHandler, false);
@@ -101,6 +105,25 @@ export default class HomePage extends React.Component {
 
   render() {
 
+    const style = {
+      display: 'inline-block',
+      margin: '16px 32px 16px 0',
+    };
+
+    const MenuExampleSimple = (
+      <div>
+        <Paper style={style}>
+          <Menu>
+            <MenuItem primaryText="Refresh" />
+            <MenuItem primaryText="Help &amp; feedback" />
+            <MenuItem primaryText="Settings" />
+            <MenuItem primaryText="Sign out" />
+          </Menu>
+        </Paper>
+      </div>
+    );
+
+
     const googleLoginButton =
       (
         <GoogleLogin
@@ -126,6 +149,7 @@ export default class HomePage extends React.Component {
           <a href="#"><i className="material-icons">dehaze</i></a>
           {googleLoginButton}
           {googleLogoutButton}
+          {MenuExampleSimple}
         </div>
       );
 

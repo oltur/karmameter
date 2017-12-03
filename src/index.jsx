@@ -2,6 +2,8 @@ import 'babel-polyfill';
 import 'styles';
 
 import React from 'react';
+import ReactDOM from 'react-dom';
+import MuiThemeProvider from 'material-ui/styles/MuiThemeProvider';
 import { render } from 'react-dom';
 import { Provider } from 'react-redux';
 import { AppContainer } from 'react-hot-loader';
@@ -13,11 +15,13 @@ const store = configureStore();
 const rootElement = document.getElementById('app');
 
 render(
-  <AppContainer>
-    <Provider store={store}>
-      <App />
-    </Provider>
-  </AppContainer>,
+  <MuiThemeProvider>
+    <AppContainer>
+      <Provider store={store}>
+        <App />
+      </Provider>
+    </AppContainer>
+  </MuiThemeProvider>,
   rootElement
 );
 
@@ -27,11 +31,13 @@ if (module.hot) {
     const NextApp = require('./components/App').default;
 
     render(
-      <AppContainer>
-        <Provider store={store}>
-          <NextApp />
-        </Provider>
-      </AppContainer>,
+      <MuiThemeProvider>
+        <AppContainer>
+          <Provider store={store}>
+            <NextApp />
+          </Provider>
+        </AppContainer>
+      </MuiThemeProvider>,
       rootElement
     );
   });
