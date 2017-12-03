@@ -1,4 +1,6 @@
 import React from 'react';
+import ReactDOM from 'react-dom';
+import { GoogleLogin, GoogleLogout } from 'react-google-login';
 import Button from 'components/ui/Button/Button';
 
 import $ from 'jquery';
@@ -52,6 +54,14 @@ export default class HomePage extends React.Component {
     })
   }
 
+  responseGoogle(response) {
+    console.log(response);
+  }
+
+  logoutGoogle(response) {
+    console.log(response);
+  }
+
   componentDidMount() {
     this.updateWindowDimensions();
     window.HomePage = this;
@@ -91,10 +101,31 @@ export default class HomePage extends React.Component {
 
   render() {
 
+    const googleLoginButton =
+      (
+        <GoogleLogin
+          clientId="19471878870-td25jvej2kq8jn7n622ttutvat4lbkvm.apps.googleusercontent.com"
+          buttonText="Login"
+          onSuccess={this.responseGoogle}
+          onFailure={this.responseGoogle}
+        />
+      );
+
+    const googleLogoutButton =
+      (
+        <GoogleLogout
+          buttonText="Logout"
+          onLogoutSuccess={this.logoutGoogle}
+        >
+        </GoogleLogout>
+      );
+
     const menu =
       (
         <div className="menu">
           <a href="#"><i className="material-icons">dehaze</i></a>
+          {googleLoginButton}
+          {googleLogoutButton}
         </div>
       );
 
