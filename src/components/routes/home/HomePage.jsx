@@ -39,6 +39,8 @@ export default class HomePage extends React.Component {
     this.upVote = this.upVote.bind(this);
     this.downVote = this.downVote.bind(this);
 
+    this.distanceSliderTimeout
+
   }
 
   upVote() {
@@ -109,8 +111,11 @@ export default class HomePage extends React.Component {
   }
 
   handleDistanceSlider = (event, value) => {
+    this.distanceSliderTimeout.clearTimeout();
+    this.distanceSliderTimeout = setTimeout(() => {
     this.setState({ ...this.state, distance: value });
     this.map.fillMarkers(value);
+    }, 500);
   };
 
   render() {
