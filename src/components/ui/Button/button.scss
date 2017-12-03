@@ -38,3 +38,33 @@
     background-color: $color-blue-900;
   }
 }
+
+.button--red {
+  color: $color-white;
+  background-color: $color-red-500;
+  font-weight: bold;
+
+  &:hover,
+  &:focus {
+    background-color: $color-red-700;
+  }
+
+  &:active {
+    background-color: $color-red-900;
+  }
+}
+
+.button--green {
+  color: $color-white;
+  background-color: $color-green-500;
+  font-weight: bold;
+
+  &:hover,
+  &:focus {
+    background-color: $color-green-700;
+  }
+
+  &:active {
+    background-color: $color-green-900;
+  }
+}

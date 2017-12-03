@@ -18,6 +18,6 @@ Button.defaultProps = {
 
 Button.propTypes = {
   component: PropTypes.oneOfType([PropTypes.string, PropTypes.element]),
-  theme: PropTypes.oneOf(['blue', 'white']),
+  theme: PropTypes.oneOf(['blue', 'white', 'red', 'green']),
   className: PropTypes.string,
 };

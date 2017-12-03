@@ -81,29 +81,42 @@ export default class HomePage extends React.Component {
 
   render() {
 
-    const content =
+    const floatingBar =
       (
-        <div>
-          {this.state.loaderText}
-          <br />
-          <Button onClick={() => { this.upVote() }} theme="blue">Yes</Button>
-          <Button onClick={() => { this.downVote() }} theme="white">No</Button>
+        <div class="floating-bar">
+
         </div>
       );
+
+    const content =
+      (
+        <div className="the-choice">
+          <div>
+            {this.state.loaderText}
+          </div>
+          <div className="buttons">
+            <Button onClick={() => { this.upVote() }} theme="green"><i className="material-icons">thumb_up</i></Button>
+            <Button onClick={() => { this.downVote() }} theme="red"><i className="material-icons">thumb_down</i></Button>
+          </div>
+          <div className="buttons">
+            <a onClick={() => {this.showOverlay(false); return false;}} href={'#'}>Maybe next time</a>
+          </div>
+        </div>
+          );
 
 
     return (
       <Loader show={this.state.loaderVisible} message={content}>
-        <div>
-          <div
-            ref={(elem) => { this.mapElem = elem; }}
-            className="map"
-            style={{ height: this.state.height }}
-          ></div>
+            <div>
+              <div
+                ref={(elem) => { this.mapElem = elem; }}
+                className="map"
+                style={{ height: this.state.height }}
+              ></div>
 
-        </div>
-      </Loader>
-    );
+            </div>
+          </Loader>
+          );
   }
 }
 
