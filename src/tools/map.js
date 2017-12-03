@@ -11,6 +11,8 @@ export default class Map {
 
         this.position;
         this.elem;
+
+        this.markersArray = [];
     }
 
     initialize(elem) {
@@ -39,17 +41,24 @@ export default class Map {
             },
         });
 
-        var request = {
-            location: this.position,
-            radius: '2000',
-            type: ['restaurant']
-        };
-
-        this.service = new google.maps.places.PlacesService(this.map);
-        this.service.nearbySearch(request, this.callback.bind(this));
         this.infowindow = new google.maps.InfoWindow({
             content: ""
         });
+
+        this.fillMarkers();
+    }
+
+    fillMarkers(distance = 2000) {
+        var request = {
+            location: this.position,
+            radius: distance,
+            type: ['restaurant']
+        };
+
+        this.clearOverlays();
+
+        this.service = new google.maps.places.PlacesService(this.map);
+        this.service.nearbySearch(request, this.callback.bind(this));
     }
 
     callback(results, status) {
@@ -68,6 +77,8 @@ export default class Map {
             position: place.geometry.location,
         });
 
+        this.markersArray.push(marker);
+
         const content = `<a href="#" onclick="window.HomePage.showOverlay(true,'${place.name.replace(/\'/g, "\\\'")}'); return false;" >${place.name}</button>`;
 
         google.maps.event.addListener(marker, 'click', () => {
@@ -76,4 +87,11 @@ export default class Map {
             //HomePage.Instance.showOverlay(true);
         });
     }
+
+    clearOverlays() {
+        for (let i = 0; i < this.markersArray.length; i++ ) {
+          this.markersArray[i].setMap(null);
+        }
+        this.markersArray.length = 0;
+      }
 }

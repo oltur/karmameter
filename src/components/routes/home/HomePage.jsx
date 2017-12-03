@@ -16,11 +16,16 @@ import Loader from 'react-loader-advanced';
 
 import './HomePage.scss';
 
+import RemoveRedEye from 'material-ui/svg-icons/image/remove-red-eye';
+import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
+
+import Slider from 'material-ui/Slider';
+
 export default class HomePage extends React.Component {
   constructor(props) {
     super(props);
 
-    this.state = { width: 0, height: 0, loaderVisible: false, loaderText: '' };
+    this.state = { width: 0, height: 0, loaderVisible: false, loaderText: '', distance: 2000 };
 
     this.map = new Map();
     this.mapElem;
@@ -103,6 +108,11 @@ export default class HomePage extends React.Component {
     this.map.initialize(this.mapElem);
   }
 
+  handleDistanceSlider = (event, value) => {
+    this.setState({ ...this.state, distance: value });
+    this.map.fillMarkers(value);
+  };
+
   render() {
 
     const style = {
@@ -110,13 +120,39 @@ export default class HomePage extends React.Component {
       margin: '16px 32px 16px 0',
     };
 
+    const SliderExampleSimple = (
+      <div>
+        <Slider
+          min={100}
+          max={50000}
+          step={100}
+          value={this.state.distance}
+          onChange={this.handleDistanceSlider}
+        />
+        <div>{this.state.distance}</div>
+      </div>
+    );
+
     const MenuExampleSimple = (
       <div>
         <Paper style={style}>
           <Menu>
-            <MenuItem primaryText="Refresh" />
+            <MenuItem primaryText="Refresh" leftIcon={<RemoveRedEye />} />
             <MenuItem primaryText="Help &amp; feedback" />
-            <MenuItem primaryText="Settings" />
+            <MenuItem primaryText="Settings" rightIcon={<ArrowDropRight />}
+              menuItems={[
+                <MenuItem
+                  primaryText="Show"
+                  rightIcon={<ArrowDropRight />}
+                  menuItems={[
+                    <MenuItem primaryText="Show Level 2" />,
+                    <MenuItem primaryText="Grid lines" checked={true} />,
+                    <MenuItem primaryText="Page breaks" insetChildren={true} />,
+                    <MenuItem primaryText="Rules" checked={true} />,
+                  ]}
+                />
+              ]}
+            />
             <MenuItem primaryText="Sign out" />
           </Menu>
         </Paper>
@@ -150,6 +186,7 @@ export default class HomePage extends React.Component {
           {googleLoginButton}
           {googleLogoutButton}
           {MenuExampleSimple}
+          {SliderExampleSimple}
         </div>
       );
 
