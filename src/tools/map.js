@@ -1,9 +1,12 @@
 import LocationProvider from './location-provider';
 // import HomePage from '../components/routes/home/HomePage'
 
-export default class Map {
+import StorageService from '../tools/storage-service';
 
+export default class Map {
   constructor() {
+
+    this.storageService = new StorageService();
     this.map;
     this.service;
     this.infowindow;
@@ -13,6 +16,9 @@ export default class Map {
     this.elem;
 
     this.markersArray = [];
+
+    this.callbackPlaceDetails = this.callbackPlaceDetails.bind(this);
+    this.callbackNearbySearch = this.callbackNearbySearch.bind(this);
   }
 
   initialize(elem) {
@@ -57,15 +63,35 @@ export default class Map {
     this.clearOverlays();
 
     this.service = new google.maps.places.PlacesService(this.map);
-    this.service.nearbySearch(request, this.callback.bind(this));
+    this.service.nearbySearch(request, this.callbackNearbySearch);
   }
 
-  callback(results, status) {
-    if (status == google.maps.places.PlacesServiceStatus.OK) {
+  callbackNearbySearch(results, status) {
+    if (status === google.maps.places.PlacesServiceStatus.OK) {
       for (let i = 0; i < results.length; i++) {
-        let place = results[i];
-        this.createMarker(results[i]);
+        const protoPlace = results[i];
+
+        if (this.storageService.hasData('google_place', protoPlace.place_id)) {
+          const place = this.storageService.getData('google_place', protoPlace.place_id);
+          this.createMarker(place);
+        } else {
+          const request = {
+            placeId: protoPlace.place_id,
+          };
+          this.service.getDetails(request, this.callbackPlaceDetails);
+        }
       }
+    }
+  }
+
+  callbackPlaceDetails(place, status) {
+    //console.log(status);
+    if (status === google.maps.places.PlacesServiceStatus.OK) {
+      place.average_rating = place.reviews && place.reviews.length ?
+        place.reviews.reduce((total, num) => (total || 0) + parseFloat(num.rating), 0) / place.reviews.length :
+        -1;
+      this.storageService.setData('google_place', place.place_id, place);
+      this.createMarker(place);
     }
   }
 
@@ -78,7 +104,9 @@ export default class Map {
 
     this.markersArray.push(marker);
 
-    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name.replace(/'/g, "'")}'); return false;" >${place.name}</span>`;
+    const ratingText = place.average_rating === -1 ? 'NA' : `${place.average_rating}/5`
+    place.displayText = `${place.name.replace(/'/g, "'")}: ${ratingText}`;
+    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.displayText}'); return false;" >${place.displayText}</span>`;
 
     google.maps.event.addListener(marker, 'mouseover', () => {
       this.infowindow.setContent(content);
@@ -87,7 +115,7 @@ export default class Map {
     });
 
     google.maps.event.addListener(marker, 'click', () => {
-      window.HomePage.showOverlay(true, place.name.replace(/'/g, "'"));
+      window.HomePage.showOverlay(true, place.displayText);
     });
   }
 
