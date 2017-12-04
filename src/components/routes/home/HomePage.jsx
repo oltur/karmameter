@@ -122,9 +122,9 @@ export default class HomePage extends React.Component {
     const SliderExampleSimple = (
       <div>
         <Slider
-          min={100}
+          min={1000}
           max={50000}
-          step={100}
+          step={1000}
           value={this.state.distance}
           onChange={this.handleDistanceSlider}
         />
