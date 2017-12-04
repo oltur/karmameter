@@ -3,6 +3,13 @@ import LocationProvider from './location-provider';
 
 import StorageService from '../tools/storage-service';
 
+import imgScale1 from '../images/scale-1.png';
+import imgScale2 from '../images/scale-2.png';
+import imgScale3 from '../images/scale-3.png';
+import imgScale4 from '../images/scale-4.png';
+import imgScale5 from '../images/scale-5.png';
+import imgScaleMinus1 from '../images/scale--1.png';
+
 export default class Map {
   constructor() {
 
@@ -19,6 +26,32 @@ export default class Map {
 
     this.callbackPlaceDetails = this.callbackPlaceDetails.bind(this);
     this.callbackNearbySearch = this.callbackNearbySearch.bind(this);
+  }
+
+  getScaleImage(value) {
+    let result = imgScaleMinus1;
+    switch (Math.round(value)) {
+      case 1:
+        result = imgScale1;
+        break;
+      case 2:
+        result = imgScale2;
+        break;
+      case 3:
+        result = imgScale3;
+        break;
+      case 4:
+        result = imgScale4;
+        break;
+      case 5:
+        result = imgScale5;
+        break;
+      default:
+        result = imgScaleMinus1;
+        break;
+    }
+
+    return result;
   }
 
   initialize(elem) {
@@ -100,13 +133,21 @@ export default class Map {
     const marker = new google.maps.Marker({
       map: this.map,
       position: placeLoc,
+      icon: {
+        url: this.getScaleImage(place.average_rating),
+        labelOrigin: new google.maps.Point(15, 10),
+      },
+      label: {
+        text: `${Math.round(place.average_rating)}`,
+        fontSize: '12px',
+      },
     });
 
     this.markersArray.push(marker);
 
     const ratingText = place.average_rating === -1 ? 'NA' : `${place.average_rating}/5`
     place.displayText = `${place.name.replace(/'/g, "'")}: ${ratingText}`;
-    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.displayText}'); return false;" >${place.displayText}</span>`;
+    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}'); return false;" >${place.displayText}</span>`;
 
     google.maps.event.addListener(marker, 'mouseover', () => {
       this.infowindow.setContent(content);
@@ -115,7 +156,7 @@ export default class Map {
     });
 
     google.maps.event.addListener(marker, 'click', () => {
-      window.HomePage.showOverlay(true, place.displayText);
+      window.HomePage.showOverlay(true, place.name);
     });
   }
 
