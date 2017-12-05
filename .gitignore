@@ -22,7 +22,5 @@ jspm_packages
 .DS_Store
 
 # Project Files
-public
-docs
 .eslintcache
 .stylelintcache
