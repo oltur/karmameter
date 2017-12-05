@@ -36,6 +36,7 @@ export default class HomePage extends React.Component {
       loaderText: '',
       distance: 2000,
       currentUser: this.storageService.currentUser,
+      menuVisible: false,
     };
 
     this.map = new Map();
@@ -83,6 +84,13 @@ export default class HomePage extends React.Component {
       currentUser: userData,
     });
     this.storageService.setData('user', 'current', userData);
+  }
+
+  toogleMenu() {
+    this.setState({
+      ...this.state,
+      menuVisible: !this.state.menuVisible,
+    });
   }
 
   loginGoogle(response) {
@@ -174,7 +182,7 @@ export default class HomePage extends React.Component {
     const loginPlaceholder = !this.state.currentUser ?
       (
         <MenuItem
-          ref={(elem) => { this.placeholderLoginGoogle = elem; }} 
+          ref={(elem) => { this.placeholderLoginGoogle = elem; }}
           primaryText={<GoogleLogin
             clientId="19471878870-td25jvej2kq8jn7n622ttutvat4lbkvm.apps.googleusercontent.com"
             buttonText="Login"
@@ -188,7 +196,7 @@ export default class HomePage extends React.Component {
     const logoutPlaceholder = this.state.currentUser ?
       (
         <MenuItem
-          ref={(elem) => { this.placeholderLogoutGoogle = elem; }} 
+          ref={(elem) => { this.placeholderLogoutGoogle = elem; }}
           primaryText={<GoogleLogout
             buttonText="Logout"
             onLogoutSuccess={this.logoutGoogle}
@@ -197,8 +205,8 @@ export default class HomePage extends React.Component {
         />
       ) : null;
 
-    const MenuExampleSimple = (
-      <div>
+    const MainMenu = (
+      <div style={{ marginTop: '-30px' }}>
         <Paper style={style}>
           <Menu>
             {myProfilePlaceholder}
@@ -222,7 +230,6 @@ export default class HomePage extends React.Component {
                 />,
               ]}
             />
-            <MenuItem primaryText="Sign out" />
           </Menu>
         </Paper>
       </div>
@@ -231,8 +238,18 @@ export default class HomePage extends React.Component {
     const menu =
       (
         <div className="menu">
-          <div role="link" tabIndex={0} className="link"><i className="material-icons">dehaze</i></div>
-          {MenuExampleSimple}
+          <div
+            role="link"
+            tabIndex={0}
+            className="link"
+            onClick={() => this.toogleMenu()}
+            onKeyPress={(event) => {
+              if (event.keyCode === 32) { this.toogleMenu(); }
+            }}
+          >
+            <i className="material-icons">dehaze</i>
+          </div>
+          { this.state.menuVisible ? MainMenu : null }
         </div>
       );
 

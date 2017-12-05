@@ -21,6 +21,9 @@
   .link {
     text-decoration: none;
     color: inherit;
+    outline: 0;
+    border: none;
+    -moz-outline-style: none
     &:link,
     &a:visited {
       color: inherit;
