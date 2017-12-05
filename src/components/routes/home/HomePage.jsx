@@ -21,7 +21,6 @@ import loadJS from '../../../tools/load-js';
 
 import './HomePage.scss';
 
-
 export default class HomePage extends React.Component {
   constructor(props) {
     super(props);

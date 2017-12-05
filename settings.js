@@ -22,5 +22,5 @@ module.exports = {
     },
   },
 
-  PUBLIC_PATH: path.join(__dirname, './public'),
+  PUBLIC_PATH: path.join(__dirname, './docs'),
 };
