@@ -155,7 +155,7 @@ export default class HomePage extends React.Component {
           value={this.state.distance}
           onChange={this.handleDistanceSlider}
         />
-        <div>{this.state.distance}</div>
+        <div style={{ fontSize: '0.8em', marginTop: '-60px' }}>(distance of {this.state.distance} meters)</div>
       </div>
     );
 
@@ -204,6 +204,7 @@ export default class HomePage extends React.Component {
             {myProfilePlaceholder}
             {loginPlaceholder}
             {logoutPlaceholder}
+            <MenuItem primaryText={SliderExampleSimple} />
             <MenuItem primaryText="Help &amp; feedback" />
             <MenuItem
               primaryText="Settings"
@@ -232,7 +233,6 @@ export default class HomePage extends React.Component {
         <div className="menu">
           <div role="link" tabIndex={0} className="link"><i className="material-icons">dehaze</i></div>
           {MenuExampleSimple}
-          {SliderExampleSimple}
         </div>
       );
 

@@ -138,7 +138,7 @@ export default class Map {
         labelOrigin: new google.maps.Point(15, 10),
       },
       label: {
-        text: `${Math.round(place.average_rating)}`,
+        text: `${place.average_rating === -1 ? '-' : Math.round(place.average_rating)}`,
         fontSize: '12px',
       },
     });
