@@ -1,4 +1,5 @@
 import React from 'react';
+import { render, createPortal } from 'react-dom';
 import { GoogleLogin, GoogleLogout } from 'react-google-login';
 import Button from 'components/ui/Button/Button';
 
@@ -8,40 +9,33 @@ import MenuItem from 'material-ui/MenuItem';
 
 import Loader from 'react-loader-advanced';
 
-import RemoveRedEye from 'material-ui/svg-icons/image/remove-red-eye';
+import Login from 'material-ui/svg-icons/action/flight-land';
+import Logout from 'material-ui/svg-icons/action/flight-takeoff';
+import Account from 'material-ui/svg-icons/action/account-box';
 import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
 
 import Slider from 'material-ui/Slider';
 
+import StorageService from '../../../tools/storage-service';
 import Map from '../../../tools/map';
-// import loadJS from '../../../tools/load-js'
+import loadJS from '../../../tools/load-js';
 
 import './HomePage.scss';
 
 
 export default class HomePage extends React.Component {
-
-  static loadJS(src) {
-    const ref = window.document.getElementsByTagName('script')[0];
-    const script = window.document.createElement('script');
-    script.src = src;
-    script.async = true;
-    ref.parentNode.insertBefore(script, ref);
-  }
-
-  static responseGoogle(response) {
-    console.log(response);
-  }
-
-  static logoutGoogle(response) {
-    console.log(response);
-  }
-
   constructor(props) {
     super(props);
 
+    this.storageService = new StorageService();
+
     this.state = {
-      width: 0, height: 0, loaderVisible: false, loaderText: '', distance: 2000,
+      width: 0,
+      height: 0,
+      loaderVisible: false,
+      loaderText: '',
+      distance: 2000,
+      currentUser: this.storageService.currentUser,
     };
 
     this.map = new Map();
@@ -49,19 +43,26 @@ export default class HomePage extends React.Component {
     this.service = null;
     this.infowindow = null;
 
+    this.placeholderLoginGoogle = null;
+    this.placeholderLogoutGoogle = null;
+    this.placeholderProfile = null;
+
     this.updateWindowDimensions = this.updateWindowDimensions.bind(this);
     this.keyDownHandler = this.keyDownHandler.bind(this);
 
     this.showOverlay = this.showOverlay.bind(this);
     this.upVote = this.upVote.bind(this);
     this.downVote = this.downVote.bind(this);
+    this.loginGoogle = this.loginGoogle.bind(this);
+    this.logoutGoogle = this.logoutGoogle.bind(this);
+    this.errorGoogle = this.errorGoogle.bind(this);
   }
 
   componentDidMount() {
     this.updateWindowDimensions();
     window.HomePage = this;
     //    window.initMap = window.HomePage.initMap;
-    HomePage.loadJS('https://maps.googleapis.com/maps/api/js?key=AIzaSyDtTQcbBh4TJUoJJZQMZMxHeRWGxjUVJ30&libraries=places&callback=HomePage.initMap');
+    loadJS('https://maps.googleapis.com/maps/api/js?key=AIzaSyDtTQcbBh4TJUoJJZQMZMxHeRWGxjUVJ30&libraries=places&callback=HomePage.initMap');
     window.addEventListener('resize', this.updateWindowDimensions);
 
     document.addEventListener('keydown', this.keyDownHandler, false);
@@ -70,6 +71,32 @@ export default class HomePage extends React.Component {
   componentWillUnmount() {
     window.removeEventListener('resize', this.updateWindowDimensions);
     document.removeEventListener('keydown', this.keyDownHandler, false);
+  }
+
+  get currentUser() {
+    return this.state.currentUser;
+  }
+
+  set currentUser(userData) {
+    this.setState({
+      ...this.state,
+      currentUser: userData,
+    });
+    this.storageService.setData('user', 'current', userData);
+  }
+
+  loginGoogle(response) {
+    console.log(this);
+    this.currentUser = response;
+    console.log(response);
+  }
+
+  errorGoogle(response) {
+    console.log(response);
+  }
+
+  logoutGoogle() {
+    this.currentUser = null;
   }
 
   showOverlay(show, id) {
@@ -132,11 +159,51 @@ export default class HomePage extends React.Component {
       </div>
     );
 
+    const myProfilePlaceholder = this.state.currentUser ?
+      (
+        <MenuItem
+          ref={(elem) => { this.placeholderProfile = elem; }}
+          primaryText={this.state.currentUser.profileObj.name}
+          leftIcon={<Account />}
+        />
+      ) :
+      (
+        <MenuItem ref={(elem) => { this.placeholderProfile = elem; }} primaryText="Anonymous" leftIcon={<Account />} />
+      );
+
+    const loginPlaceholder = !this.state.currentUser ?
+      (
+        <MenuItem
+          ref={(elem) => { this.placeholderLoginGoogle = elem; }} 
+          primaryText={<GoogleLogin
+            clientId="19471878870-td25jvej2kq8jn7n622ttutvat4lbkvm.apps.googleusercontent.com"
+            buttonText="Login"
+            onSuccess={this.loginGoogle}
+            onFailure={this.errorGoogle}
+          />}
+          leftIcon={<Login />}
+        />
+      ) : null;
+
+    const logoutPlaceholder = this.state.currentUser ?
+      (
+        <MenuItem
+          ref={(elem) => { this.placeholderLogoutGoogle = elem; }} 
+          primaryText={<GoogleLogout
+            buttonText="Logout"
+            onLogoutSuccess={this.logoutGoogle}
+          />}
+          leftIcon={<Logout />}
+        />
+      ) : null;
+
     const MenuExampleSimple = (
       <div>
         <Paper style={style}>
           <Menu>
-            <MenuItem primaryText="Refresh" leftIcon={<RemoveRedEye />} />
+            {myProfilePlaceholder}
+            {loginPlaceholder}
+            {logoutPlaceholder}
             <MenuItem primaryText="Help &amp; feedback" />
             <MenuItem
               primaryText="Settings"
@@ -160,37 +227,16 @@ export default class HomePage extends React.Component {
       </div>
     );
 
-
-    const googleLoginButton =
-      (
-        <GoogleLogin
-          clientId="19471878870-td25jvej2kq8jn7n622ttutvat4lbkvm.apps.googleusercontent.com"
-          buttonText="Login"
-          onSuccess={this.responseGoogle}
-          onFailure={this.responseGoogle}
-        />
-      );
-
-    const googleLogoutButton =
-      (
-        <GoogleLogout
-          buttonText="Logout"
-          onLogoutSuccess={this.logoutGoogle}
-        />
-      );
-
     const menu =
       (
         <div className="menu">
           <div role="link" tabIndex={0} className="link"><i className="material-icons">dehaze</i></div>
-          {googleLoginButton}
-          {googleLogoutButton}
           {MenuExampleSimple}
           {SliderExampleSimple}
         </div>
       );
 
-    const content =
+    const loaderContent =
       (
         <div className="the-choice">
           <div className="text">
@@ -217,8 +263,8 @@ export default class HomePage extends React.Component {
       );
 
 
-    return (
-      <Loader show={this.state.loaderVisible} message={content}>
+    const result = (
+      <Loader show={this.state.loaderVisible} message={loaderContent}>
         <div>
           {menu}
           <div
@@ -230,6 +276,8 @@ export default class HomePage extends React.Component {
         </div>
       </Loader>
     );
+
+    return result;
   }
 }
 

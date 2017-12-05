@@ -16,4 +16,9 @@ export default class StorageService {
   hasData(prefix, key) {
     return localStorage.getItem(this.createId(prefix, key));
   }
+
+  deleteData(prefix, key) {
+    return localStorage.removeItem(this.createId(prefix, key));
+  }
+
 }
