@@ -1,5 +1,4 @@
 import React from 'react';
-import { render, createPortal } from 'react-dom';
 import { GoogleLogin, GoogleLogout } from 'react-google-login';
 import Button from 'components/ui/Button/Button';
 
