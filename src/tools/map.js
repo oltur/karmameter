@@ -22,6 +22,7 @@ export default class Map {
     this.position;
     this.elem;
 
+    this.selectedTypes = ['restaurant'];
     this.markersArray = [];
 
     this.callbackPlaceDetails = this.callbackPlaceDetails.bind(this);
@@ -90,7 +91,7 @@ export default class Map {
     const request = {
       location: this.position,
       radius: distance,
-      type: ['restaurant'],
+      type: this.selectedTypes,
     };
 
     this.clearOverlays();
@@ -145,9 +146,11 @@ export default class Map {
 
     this.markersArray.push(marker);
 
-    const ratingText = place.average_rating === -1 ? 'NA' : `${place.average_rating}/5`
-    place.displayText = `${place.name.replace(/'/g, "'")}: ${ratingText}`;
-    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}'); return false;" >${place.displayText}</span>`;
+    // console.log(place);
+    
+    const ratingText = place.average_rating === -1 ? 'NA' : `${place.average_rating}/5`;
+    place.displayText = `${place.name.replace(/'/g, "'")}: ${ratingText} (${place.types[0]})`;
+    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}<br/>(${place.types[0]})'); return false;" >${place.displayText}</span>`;
 
     google.maps.event.addListener(marker, 'mouseover', () => {
       this.infowindow.setContent(content);
@@ -156,7 +159,7 @@ export default class Map {
     });
 
     google.maps.event.addListener(marker, 'click', () => {
-      window.HomePage.showOverlay(true, place.name);
+      window.HomePage.showOverlay(true, `${place.name}<br/>(${place.types[0]})`);
     });
   }
 

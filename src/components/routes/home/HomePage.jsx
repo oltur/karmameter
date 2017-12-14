@@ -5,7 +5,7 @@ import Button from 'components/ui/Button/Button';
 import Paper from 'material-ui/Paper';
 import Menu from 'material-ui/Menu';
 import MenuItem from 'material-ui/MenuItem';
-
+import SelectField from 'material-ui/SelectField';
 import Loader from 'react-loader-advanced';
 
 import Login from 'material-ui/svg-icons/action/flight-land';
@@ -35,6 +35,99 @@ export default class HomePage extends React.Component {
       distance: 2000,
       currentUser: this.storageService.currentUser,
       menuVisible: false,
+      names: [
+        'accounting',
+        'airport',
+        'amusement_park',
+        'aquarium',
+        'art_gallery',
+        'atm',
+        'bakery',
+        'bank',
+        'bar',
+        'beauty_salon',
+        'bicycle_store',
+        'book_store',
+        'bowling_alley',
+        'bus_station',
+        'cafe',
+        'campground',
+        'car_dealer',
+        'car_rental',
+        'car_repair',
+        'car_wash',
+        'casino',
+        'cemetery',
+        'church',
+        'city_hall',
+        'clothing_store',
+        'convenience_store',
+        'courthouse',
+        'dentist',
+        'department_store',
+        'doctor',
+        'electrician',
+        'electronics_store',
+        'embassy',
+        'fire_station',
+        'florist',
+        'funeral_home',
+        'furniture_store',
+        'gas_station',
+        'gym',
+        'hair_care',
+        'hardware_store',
+        'hindu_temple',
+        'home_goods_store',
+        'hospital',
+        'insurance_agency',
+        'jewelry_store',
+        'laundry',
+        'lawyer',
+        'library',
+        'liquor_store',
+        'local_government_office',
+        'locksmith',
+        'lodging',
+        'meal_delivery',
+        'meal_takeaway',
+        'mosque',
+        'movie_rental',
+        'movie_theater',
+        'moving_company',
+        'museum',
+        'night_club',
+        'painter',
+        'park',
+        'parking',
+        'pet_store',
+        'pharmacy',
+        'physiotherapist',
+        'plumber',
+        'police',
+        'post_office',
+        'real_estate_agency',
+        'restaurant',
+        'roofing_contractor',
+        'rv_park',
+        'school',
+        'shoe_store',
+        'shopping_mall',
+        'spa',
+        'stadium',
+        'storage',
+        'store',
+        'subway_station',
+        'synagogue',
+        'taxi_stand',
+        'train_station',
+        'transit_station',
+        'travel_agency',
+        'university',
+        'veterinary_care',
+        'zoo',
+      ],
+      values: [],
     };
 
     this.map = new Map();
@@ -143,8 +236,26 @@ export default class HomePage extends React.Component {
 
   handleDistanceSlider = (event, value) => {
     this.setState({ ...this.state, distance: value });
-    this.map.fillMarkers(value);
+    this.map.fillMarkers(this.state.distance);
   };
+
+  handleChange = (event, index, values) => {
+    this.setState({ ...this.state, values });
+    this.map.selectedTypes = this.state.values;
+    this.map.fillMarkers(this.state.distance);
+  }
+
+  menuItems(values) {
+    return this.state.names.map((name) => (
+      <MenuItem
+        key={name}
+        insetChildren
+        checked={values && values.indexOf(name) > -1}
+        value={name}
+        primaryText={name}
+      />
+    ));
+  }
 
   render() {
     const style = {
@@ -203,6 +314,20 @@ export default class HomePage extends React.Component {
         />
       ) : null;
 
+    const { values } = this.state;
+    const multiSelectSample = (
+      <SelectField
+        className="multiselect"
+        multiple
+        floatingLabelText="Choose places types"
+        hintText="Select a name"
+        value={values}
+        onChange={this.handleChange}
+      >
+        {this.menuItems(values)}
+      </SelectField>
+    );
+
     const MainMenu = (
       <div style={{ marginTop: '-30px' }}>
         <Paper style={style}>
@@ -210,6 +335,8 @@ export default class HomePage extends React.Component {
             {myProfilePlaceholder}
             {loginPlaceholder}
             {logoutPlaceholder}
+
+            {multiSelectSample}
             <MenuItem primaryText={SliderExampleSimple} />
             <MenuItem primaryText="Help &amp; feedback" />
             <MenuItem
@@ -247,7 +374,7 @@ export default class HomePage extends React.Component {
           >
             <i className="material-icons">dehaze</i>
           </div>
-          { this.state.menuVisible ? MainMenu : null }
+          {this.state.menuVisible ? MainMenu : null}
         </div>
       );
 
@@ -257,7 +384,7 @@ export default class HomePage extends React.Component {
           <div className="text">
             Fix the karma of
           </div>
-          <div className="name">{this.state.loaderText}</div>
+          <div className="name" dangerouslySetInnerHTML={{ __html: this.state.loaderText }}></div>
           <div className="buttons">
             <Button onClick={() => { this.upVote(); }} theme="green"><i className="material-icons">thumb_up</i></Button>
             <Button onClick={() => { this.downVote(); }} theme="red"><i className="material-icons">thumb_down</i></Button>

@@ -4,16 +4,15 @@
 }
 
 .menu {
-  user-select:none;
+  user-select: none;
   z-index: 5;
   position: fixed;
   left: 15px;
   border-radius: 5px;
   padding: 2px;
   color: grey;
-  text-shadow: 1px 1px white;
-//  background: rgb(0, 0, 0);
-//  background: rgba(0, 0, 0, .1);
+  text-shadow: 1px 1px white; //  background: rgb(0, 0, 0);
+  //  background: rgba(0, 0, 0, .1);
   .material-icons {
     font-size: 3.2em;
     line-height: 1.6;
@@ -23,8 +22,7 @@
     color: inherit;
     outline: 0;
     border: none;
-    -moz-outline-style: none
-    &:link,
+    -moz-outline-style: none &:link,
     &a:visited {
       color: inherit;
     }
@@ -32,6 +30,10 @@
       color: black;
     }
   }
+}
+
+.multiselect {
+  margin: 0 0 0 20px;
 }
 
 .the-choice {
