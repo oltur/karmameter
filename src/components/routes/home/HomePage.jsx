@@ -16,6 +16,7 @@ import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
 import Slider from 'material-ui/Slider';
 
 import StorageService from '../../../tools/storage-service';
+import Helpers from '../../../tools/helpers';
 import Map from '../../business/map/Map';
 import loadJS from '../../../tools/load-js';
 
@@ -251,7 +252,7 @@ export default class HomePage extends React.Component {
         insetChildren
         checked={values && values.indexOf(name) > -1}
         value={name}
-        primaryText={name}
+        primaryText={Helpers.decodeGoogleLocationName(name)}
       />
     ));
   }
