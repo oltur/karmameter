@@ -233,13 +233,15 @@ export default class HomePage extends React.Component {
 
   handleDistanceSlider = (event, value) => {
     this.setState({ ...this.state, distance: value });
-    this.map.fillMarkers(this.state.distance);
+    this.map.distance = value;
+    this.map.fillMarkers();
   };
 
   handleChange = (event, index, values) => {
     this.setState({ ...this.state, values });
     this.map.selectedTypes = values;
-    this.map.fillMarkers(this.state.distance);
+    this.map.distance = this.state.distance;
+    this.map.fillMarkers();
   }
 
   menuItems(values) {

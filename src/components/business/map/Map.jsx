@@ -1,6 +1,9 @@
 /*global google*/
 import React from 'react';
 import PropTypes from 'prop-types';
+import Popover from 'material-ui/Popover';
+import Menu from 'material-ui/Menu';
+import MenuItem from 'material-ui/MenuItem';
 
 import LocationProvider from '../../../tools/location-provider';
 // import HomePage from '../components/routes/home/HomePage'
@@ -14,6 +17,7 @@ import imgScale3 from '../../../images/scale-3.png';
 import imgScale4 from '../../../images/scale-4.png';
 import imgScale5 from '../../../images/scale-5.png';
 import imgScaleMinus1 from '../../../images/scale--1.png';
+import imageMyLocation from '../../../images/my-location.png';
 
 export default class Map extends React.Component {
   static propTypes = {
@@ -31,18 +35,39 @@ export default class Map extends React.Component {
 
     this.position = null;
     this.mapElem = null;
+    this.locationMarker = null;
 
     this.selectedTypes = ['restaurant'];
     this.markersArray = [];
+    this.distance = 2000;
+
+    this.menuAnchor = null;
+    this.state = {
+      popUpMenuOpen: false,
+      popUpMenuLeft: 0,
+      popUpMenuTop: 0,
+      lastClickLocation: null,
+    };
 
     this.callbackPlaceDetails = this.callbackPlaceDetails.bind(this);
     this.callbackNearbySearch = this.callbackNearbySearch.bind(this);
+    this.handleRequestClose = this.handleRequestClose.bind(this);
   }
 
-  onMapClick(location) {
-    const marker = new google.maps.Marker({
-      position: location,
-      map: this.map,
+  onMapClick(event) {
+    if (!event.pixel) {
+      return;
+    }
+    //console.log(event);
+    // This prevents ghost click.
+    //event.preventDefault();
+
+    this.setState({
+      ...this.state,
+      popUpMenuOpen: true,
+      popUpMenuLeft: event.pixel.x,
+      popUpMenuTop: event.pixel.y,
+      lastClickLocation: event.latLng,
     });
   }
 
@@ -83,11 +108,38 @@ export default class Map extends React.Component {
       },
     });
 
+    this.locationMarker = new google.maps.Marker({
+      position: this.position,
+      map: this.map,
+      icon: {
+        url: imageMyLocation,
+        scaledSize: new google.maps.Size(32, 32),
+        // origin: new google.maps.Point(16, 16),
+        anchor: new google.maps.Point(16, 16),
+      },
+    });
+
+    google.maps.event.addListener(this.map, 'click', (event) => {
+      this.onMapClick(event);
+    });
+
+
     this.infowindow = new google.maps.InfoWindow({
       content: '',
     });
 
     this.fillMarkers();
+  }
+
+  setPosition() {
+    this.position = this.state.lastClickLocation;
+    this.map.setCenter(this.position);
+    this.locationMarker.setPosition(this.position);
+    this.fillMarkers();
+    this.setState({
+      ...this.state,
+      popUpMenuOpen: false,
+    });
   }
 
   initialize() {
@@ -103,10 +155,10 @@ export default class Map extends React.Component {
       });
   }
 
-  fillMarkers(distance = 2000) {
+  fillMarkers() {
     const request = {
       location: this.position,
-      radius: distance,
+      radius: this.distance,
       type: this.selectedTypes,
     };
 
@@ -170,10 +222,6 @@ export default class Map extends React.Component {
     place.displayText = `${place.name.replace(/'/g, "'")}<br/>${ratingText}</br/>(${typeText})`;
     const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}<br/>(${typeText})'); return false;" >${place.displayText}</span>`;
 
-    google.maps.event.addListener(this.map, 'click', (event) => {
-      this.onMapClick(event.latLng);
-    });
-
     google.maps.event.addListener(marker, 'mouseover', () => {
       this.infowindow.setContent(content);
       this.infowindow.open(this.map, marker);
@@ -192,20 +240,66 @@ export default class Map extends React.Component {
     this.markersArray.length = 0;
   }
 
+  addPlace() {
+    const marker = new google.maps.Marker({
+      position: this.state.lastClickLocation,
+      map: this.map,
+    });
+
+    this.setState({
+      ...this.state,
+      popUpMenuOpen: false,
+    });
+  }
+
+  handleRequestClose() {
+    this.setState({
+      ...this.state,
+      popUpMenuOpen: false,
+    });
+  }
+
   render() {
+    const popUpMenu = (
+      <Popover
+        open={this.state.popUpMenuOpen}
+        anchorEl={this.menuAnchor}
+        anchorOrigin={{ horizontal: 'left', vertical: 'bottom' }}
+        targetOrigin={{ horizontal: 'left', vertical: 'top' }}
+        onRequestClose={this.handleRequestClose}
+      >
+        <Menu>
+          <MenuItem primaryText="Set position" onClick={() => this.setPosition()} />
+          <MenuItem primaryText="Add place" onClick={() => this.addPlace()} />
+        </Menu>
+      </Popover>
+    );
+
     return (
-      <div
-        ref={(elem) => {
-          this.mapElem = elem;
-        }
-        }
-        className="map"
-        style={
-          {
-            height: this.props.height,
+      <div>
+        <div
+          ref={(elem) => { this.mapElem = elem; }}
+          className="map"
+          style={
+            {
+              height: this.props.height,
+            }
           }
-        }
-      />
+        />
+        <div
+          ref={(elem) => { this.menuAnchor = elem; }}
+          style={
+            {
+              position: 'fixed',
+              left: this.state.popUpMenuLeft,
+              top: this.state.popUpMenuTop,
+              height: '1px',
+              width: '1px',
+            }
+          }
+        />
+        {popUpMenu}
+      </div>
     );
   }
 }
