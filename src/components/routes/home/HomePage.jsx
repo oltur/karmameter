@@ -127,7 +127,7 @@ export default class HomePage extends React.Component {
         'veterinary_care',
         'zoo',
       ],
-      values: [],
+      values: ['restaurant'],
     };
 
     this.map = new Map();
@@ -241,7 +241,7 @@ export default class HomePage extends React.Component {
 
   handleChange = (event, index, values) => {
     this.setState({ ...this.state, values });
-    this.map.selectedTypes = this.state.values;
+    this.map.selectedTypes = values;
     this.map.fillMarkers(this.state.distance);
   }
 
@@ -265,6 +265,7 @@ export default class HomePage extends React.Component {
 
     const SliderExampleSimple = (
       <div>
+        <div style={{ fontSize: '0.8em', lineHeight: 1, color: 'lightgrey' }}>Distance: {this.state.distance} m.</div>
         <Slider
           min={1000}
           max={50000}
@@ -272,7 +273,6 @@ export default class HomePage extends React.Component {
           value={this.state.distance}
           onChange={this.handleDistanceSlider}
         />
-        <div style={{ fontSize: '0.8em', marginTop: '-60px' }}>(distance of {this.state.distance} meters)</div>
       </div>
     );
 

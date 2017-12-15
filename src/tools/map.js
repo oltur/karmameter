@@ -146,8 +146,8 @@ export default class Map {
     this.markersArray.push(marker);
 
     // console.log(place);
-    
-    const ratingText = place.average_rating === -1 ? 'NA' : `${place.average_rating}/5`;
+
+    const ratingText = place.average_rating === -1 ? 'NA' : `${Math.round(place.average_rating * 10) / 10} / 5`;
     place.displayText = `${place.name.replace(/'/g, "'")}: ${ratingText} (${place.types[0]})`;
     const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}<br/>(${place.types[0]})'); return false;" >${place.displayText}</span>`;
 
@@ -162,7 +162,7 @@ export default class Map {
     });
 
     google.maps.event.addListener(marker, 'click', () => {
-       window.HomePage.showOverlay(true, `${place.name}<br/>(${place.types[0]})`);
+      window.HomePage.showOverlay(true, `${place.name}<br/>(${place.types[0]})`);
     });
   }
 
