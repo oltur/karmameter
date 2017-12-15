@@ -12,7 +12,6 @@ import imgScaleMinus1 from '../images/scale--1.png';
 
 export default class Map {
   constructor() {
-
     this.storageService = new StorageService();
     this.map;
     this.service;
@@ -145,9 +144,13 @@ export default class Map {
 
     this.markersArray.push(marker);
 
-    const ratingText = place.average_rating === -1 ? 'NA' : `${place.average_rating}/5`
+    const ratingText = place.average_rating === -1 ? 'NA' : `${place.average_rating}/5`;
     place.displayText = `${place.name.replace(/'/g, "'")}: ${ratingText}`;
     const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}'); return false;" >${place.displayText}</span>`;
+
+    google.maps.event.addListener(this.map, 'click', (event) => {
+      this.onMapClick(event.latLng);
+    });
 
     google.maps.event.addListener(marker, 'mouseover', () => {
       this.infowindow.setContent(content);
@@ -160,6 +163,12 @@ export default class Map {
     });
   }
 
+  onMapClick(location) {
+    const marker = new google.maps.Marker({
+      position: location,
+      map: this.map,
+    });
+  }
   clearOverlays() {
     for (let i = 0; i < this.markersArray.length; i++) {
       this.markersArray[i].setMap(null);
