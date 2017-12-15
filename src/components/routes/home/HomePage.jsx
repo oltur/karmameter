@@ -16,14 +16,14 @@ import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
 import Slider from 'material-ui/Slider';
 
 import StorageService from '../../../tools/storage-service';
-import Map from '../../../tools/map';
+import Map from '../../business/map/Map';
 import loadJS from '../../../tools/load-js';
 
 import './HomePage.scss';
 
 export default class HomePage extends React.Component {
-  constructor(props) {
-    super(props);
+  constructor() {
+    super();
 
     this.storageService = new StorageService();
 
@@ -130,10 +130,7 @@ export default class HomePage extends React.Component {
       values: ['restaurant'],
     };
 
-    this.map = new Map();
-    this.mapElem = null;
-    this.service = null;
-    this.infowindow = null;
+    this.map = null;
 
     this.placeholderLoginGoogle = null;
     this.placeholderLogoutGoogle = null;
@@ -231,7 +228,7 @@ export default class HomePage extends React.Component {
   }
 
   initMap() {
-    this.map.initialize(this.mapElem);
+    this.map.initialize();
   }
 
   handleDistanceSlider = (event, value) => {
@@ -384,7 +381,7 @@ export default class HomePage extends React.Component {
           <div className="text">
             Fix the karma of
           </div>
-          <div className="name" dangerouslySetInnerHTML={{ __html: this.state.loaderText }}></div>
+          <div className="name" dangerouslySetInnerHTML={{ __html: this.state.loaderText }} />
           <div className="buttons">
             <Button onClick={() => { this.upVote(); }} theme="green"><i className="material-icons">thumb_up</i></Button>
             <Button onClick={() => { this.downVote(); }} theme="red"><i className="material-icons">thumb_down</i></Button>
@@ -409,11 +406,15 @@ export default class HomePage extends React.Component {
       <Loader show={this.state.loaderVisible} message={loaderContent}>
         <div>
           {menu}
-          <div
+          <Map
+            ref={(elem) => { this.map = elem; }}
+            height={this.state.height}
+          />
+          {/* <div
             ref={(elem) => { this.mapElem = elem; }}
             className="map"
             style={{ height: this.state.height }}
-          />
+          /> */}
 
         </div>
       </Loader>

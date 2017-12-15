@@ -1,31 +1,49 @@
-import LocationProvider from './location-provider';
+/*global google*/
+import React from 'react';
+import PropTypes from 'prop-types';
+
+import LocationProvider from '../../../tools/location-provider';
 // import HomePage from '../components/routes/home/HomePage'
+import Helpers from '../../../tools/helpers';
 
-import StorageService from '../tools/storage-service';
+import StorageService from '../../../tools/storage-service';
 
-import imgScale1 from '../images/scale-1.png';
-import imgScale2 from '../images/scale-2.png';
-import imgScale3 from '../images/scale-3.png';
-import imgScale4 from '../images/scale-4.png';
-import imgScale5 from '../images/scale-5.png';
-import imgScaleMinus1 from '../images/scale--1.png';
+import imgScale1 from '../../../images/scale-1.png';
+import imgScale2 from '../../../images/scale-2.png';
+import imgScale3 from '../../../images/scale-3.png';
+import imgScale4 from '../../../images/scale-4.png';
+import imgScale5 from '../../../images/scale-5.png';
+import imgScaleMinus1 from '../../../images/scale--1.png';
 
-export default class Map {
-  constructor() {
+export default class Map extends React.Component {
+  static propTypes = {
+    height: PropTypes.number.isRequired,
+  }
+
+  constructor(props) {
+    super(props);
+
     this.storageService = new StorageService();
-    this.map;
-    this.service;
-    this.infowindow;
+    this.map = null;
+    this.service = null;
+    this.infowindow = null;
     this.locationProvider = new LocationProvider();
 
-    this.position;
-    this.elem;
+    this.position = null;
+    this.mapElem = null;
 
     this.selectedTypes = ['restaurant'];
     this.markersArray = [];
 
     this.callbackPlaceDetails = this.callbackPlaceDetails.bind(this);
     this.callbackNearbySearch = this.callbackNearbySearch.bind(this);
+  }
+
+  onMapClick(location) {
+    const marker = new google.maps.Marker({
+      position: location,
+      map: this.map,
+    });
   }
 
   getScaleImage(value) {
@@ -54,22 +72,8 @@ export default class Map {
     return result;
   }
 
-  initialize(elem) {
-    this.elem = elem;
-    this.locationProvider.getPosition()
-      .then((position) => {
-        this.position = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
-        this.setupMap();
-      })
-      .catch((err) => {
-        console.error(err.message);
-        this.position = new google.maps.LatLng(31, 35);
-        this.setupMap();
-      });
-  }
-
   setupMap() {
-    this.map = new google.maps.Map(this.elem, {
+    this.map = new google.maps.Map(this.mapElem, {
       center: this.position,
       zoom: 15,
       mapTypeControl: true,
@@ -84,6 +88,19 @@ export default class Map {
     });
 
     this.fillMarkers();
+  }
+
+  initialize() {
+    this.locationProvider.getPosition()
+      .then((position) => {
+        this.position = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+        this.setupMap();
+      })
+      .catch((err) => {
+        console.error(err.message);
+        this.position = new google.maps.LatLng(31, 35);
+        this.setupMap();
+      });
   }
 
   fillMarkers(distance = 2000) {
@@ -121,7 +138,8 @@ export default class Map {
     //console.log(status);
     if (status === google.maps.places.PlacesServiceStatus.OK) {
       place.average_rating = place.reviews && place.reviews.length ?
-        place.reviews.reduce((total, num) => (total || 0) + parseFloat(num.rating), 0) / place.reviews.length :
+        place.reviews.reduce((total, num) =>
+          (total || 0) + parseFloat(num.rating), 0) / place.reviews.length :
         -1;
       this.storageService.setData('google_place', place.place_id, place);
       this.createMarker(place);
@@ -148,8 +166,9 @@ export default class Map {
     // console.log(place);
 
     const ratingText = place.average_rating === -1 ? 'NA' : `${Math.round(place.average_rating * 10) / 10} / 5`;
-    place.displayText = `${place.name.replace(/'/g, "'")}: ${ratingText} (${place.types[0]})`;
-    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}<br/>(${place.types[0]})'); return false;" >${place.displayText}</span>`;
+    const typeText = Helpers.decodeGoogleLocationName(place.types[0]);
+    place.displayText = `${place.name.replace(/'/g, "'")}<br/>${ratingText}</br/>(${typeText})`;
+    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}<br/>(${typeText})'); return false;" >${place.displayText}</span>`;
 
     google.maps.event.addListener(this.map, 'click', (event) => {
       this.onMapClick(event.latLng);
@@ -162,20 +181,31 @@ export default class Map {
     });
 
     google.maps.event.addListener(marker, 'click', () => {
-      window.HomePage.showOverlay(true, `${place.name}<br/>(${place.types[0]})`);
+      window.HomePage.showOverlay(true, `${place.name}<br/>(${typeText})`);
     });
   }
 
-  onMapClick(location) {
-    const marker = new google.maps.Marker({
-      position: location,
-      map: this.map,
-    });
-  }
   clearOverlays() {
     for (let i = 0; i < this.markersArray.length; i++) {
       this.markersArray[i].setMap(null);
     }
     this.markersArray.length = 0;
+  }
+
+  render() {
+    return (
+      <div
+        ref={(elem) => {
+          this.mapElem = elem;
+        }
+        }
+        className="map"
+        style={
+          {
+            height: this.props.height,
+          }
+        }
+      />
+    );
   }
 }

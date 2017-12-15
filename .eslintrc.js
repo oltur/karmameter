@@ -12,6 +12,9 @@ module.exports = {
     'global-require': 'off',
     'spaced-comment': 'off',
     'linebreak-style': 'off',
+    'class-methods-use-this': 'off',
+    'no-plusplus': ["error", { "allowForLoopAfterthoughts": true }],
+    'no-param-reassign': ["error", { "props": false }],
     'comma-dangle': ['error', {
       arrays: 'always-multiline',
       objects: 'always-multiline',
