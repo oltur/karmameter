@@ -1,3 +1,4 @@
+/*global google*/
 import React from 'react';
 import { GoogleLogin, GoogleLogout } from 'react-google-login';
 import Button from 'components/ui/Button/Button';
@@ -6,12 +7,13 @@ import Paper from 'material-ui/Paper';
 import Menu from 'material-ui/Menu';
 import MenuItem from 'material-ui/MenuItem';
 import SelectField from 'material-ui/SelectField';
+import TextField from 'material-ui/TextField';
 import Loader from 'react-loader-advanced';
 
 import Login from 'material-ui/svg-icons/action/flight-land';
 import Logout from 'material-ui/svg-icons/action/flight-takeoff';
 import Account from 'material-ui/svg-icons/action/account-box';
-import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
+//import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
 
 import Slider from 'material-ui/Slider';
 
@@ -27,6 +29,7 @@ export default class HomePage extends React.Component {
     super();
 
     this.storageService = new StorageService();
+    this.geocoderService = null;
 
     this.state = {
       width: 0,
@@ -36,6 +39,7 @@ export default class HomePage extends React.Component {
       distance: 2000,
       currentUser: this.storageService.currentUser,
       menuVisible: false,
+      inputValueAddress: '',
       names: [
         'accounting',
         'airport',
@@ -136,6 +140,7 @@ export default class HomePage extends React.Component {
     this.placeholderLoginGoogle = null;
     this.placeholderLogoutGoogle = null;
     this.placeholderProfile = null;
+    this.textFieldAddress = null;
 
     this.updateWindowDimensions = this.updateWindowDimensions.bind(this);
     this.keyDownHandler = this.keyDownHandler.bind(this);
@@ -146,6 +151,8 @@ export default class HomePage extends React.Component {
     this.loginGoogle = this.loginGoogle.bind(this);
     this.logoutGoogle = this.logoutGoogle.bind(this);
     this.errorGoogle = this.errorGoogle.bind(this);
+    this.handleAddressKeyDown = this.handleAddressKeyDown.bind(this);
+    this.handleUpdateAddressValue = this.handleUpdateAddressValue.bind(this);
   }
 
   componentDidMount() {
@@ -229,6 +236,7 @@ export default class HomePage extends React.Component {
   }
 
   initMap() {
+    this.geocoderService = new google.maps.Geocoder();
     this.map.initialize();
   }
 
@@ -243,6 +251,39 @@ export default class HomePage extends React.Component {
     this.map.selectedTypes = values;
     this.map.distance = this.state.distance;
     this.map.fillMarkers();
+  }
+
+  handleUpdateAddressValue(evt) {
+    this.setState({
+      ...this.state,
+      inputValueAddress: evt.target.value,
+    });
+  }
+
+  handleAddressKeyDown = (event) => {
+    // console.log(event.key);
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      console.log(this.textFieldAddress);
+      this.geocoderService.geocode(
+        {
+          address: this.state.inputValueAddress,
+        },
+        (results, status) => {
+          if (status === 'OK') {
+            this.map.position = results[0].geometry.location;
+            this.map.setPosition();
+            // map.setCenter(results[0].geometry.location);
+            // var marker = new google.maps.Marker({
+            //   map: map,
+            //   position: results[0].geometry.location
+            // });
+          } else {
+            alert('Geocode was not successful for the following reason: ' + status);
+          }
+        }
+      );
+    }
   }
 
   menuItems(values) {
@@ -274,6 +315,16 @@ export default class HomePage extends React.Component {
           onChange={this.handleDistanceSlider}
         />
       </div>
+    );
+
+    const menuGeocoder = (
+      <TextField
+        ref={(elem) => { this.textFieldAddress = elem; }}
+        floatingLabelText="Enter an address to look for"
+        onKeyDown={(event) => this.handleAddressKeyDown(event)}
+        value={this.state.valueAddress}
+        onChange={evt => this.handleUpdateAddressValue(evt)}
+      />
     );
 
     const myProfilePlaceholder = this.state.currentUser ?
@@ -339,7 +390,9 @@ export default class HomePage extends React.Component {
             {multiSelectSample}
             <MenuItem primaryText={SliderExampleSimple} />
             <MenuItem primaryText="Help &amp; feedback" />
-            <MenuItem
+            {menuGeocoder}
+
+            {/* <MenuItem
               primaryText="Settings"
               rightIcon={<ArrowDropRight />}
               menuItems={[
@@ -354,7 +407,7 @@ export default class HomePage extends React.Component {
                   ]}
                 />,
               ]}
-            />
+            /> */}
           </Menu>
         </Paper>
       </div>

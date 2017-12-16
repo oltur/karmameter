@@ -29,7 +29,6 @@ export default class Map extends React.Component {
 
     this.storageService = new StorageService();
     this.map = null;
-    this.service = null;
     this.infowindow = null;
     this.locationProvider = new LocationProvider();
 
@@ -52,6 +51,8 @@ export default class Map extends React.Component {
     this.callbackPlaceDetails = this.callbackPlaceDetails.bind(this);
     this.callbackNearbySearch = this.callbackNearbySearch.bind(this);
     this.handleRequestClose = this.handleRequestClose.bind(this);
+
+    this.placesService = null;
   }
 
   onMapClick(event) {
@@ -108,6 +109,7 @@ export default class Map extends React.Component {
       },
     });
 
+    this.placesService = new google.maps.places.PlacesService(this.map);
     this.locationMarker = new google.maps.Marker({
       position: this.position,
       map: this.map,
@@ -131,8 +133,12 @@ export default class Map extends React.Component {
     this.fillMarkers();
   }
 
-  setPosition() {
+  setPositionByLastClickLocation() {
     this.position = this.state.lastClickLocation;
+    this.setPosition();
+  }
+
+  setPosition() {
     this.map.setCenter(this.position);
     this.locationMarker.setPosition(this.position);
     this.fillMarkers();
@@ -164,8 +170,7 @@ export default class Map extends React.Component {
 
     this.clearOverlays();
 
-    this.service = new google.maps.places.PlacesService(this.map);
-    this.service.nearbySearch(request, this.callbackNearbySearch);
+    this.placesService.nearbySearch(request, this.callbackNearbySearch);
   }
 
   callbackNearbySearch(results, status) {
@@ -180,7 +185,7 @@ export default class Map extends React.Component {
           const request = {
             placeId: protoPlace.place_id,
           };
-          this.service.getDetails(request, this.callbackPlaceDetails);
+          this.placesService.getDetails(request, this.callbackPlaceDetails);
         }
       }
     }
@@ -269,7 +274,7 @@ export default class Map extends React.Component {
         onRequestClose={this.handleRequestClose}
       >
         <Menu>
-          <MenuItem primaryText="Set position" onClick={() => this.setPosition()} />
+          <MenuItem primaryText="Set position" onClick={() => this.setPositionByLastClickLocation()} />
           <MenuItem primaryText="Add place" onClick={() => this.addPlace()} />
         </Menu>
       </Popover>
