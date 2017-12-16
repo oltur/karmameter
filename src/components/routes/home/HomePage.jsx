@@ -299,15 +299,11 @@ export default class HomePage extends React.Component {
   }
 
   render() {
-    const style = {
-      display: 'inline-block',
-      margin: '16px 32px 16px 0',
-    };
-
-    const SliderExampleSimple = (
-      <div>
-        <div style={{ fontSize: '0.8em', lineHeight: 1, color: 'lightgrey' }}>Distance: {this.state.distance} m.</div>
+    const sliderDistance = (
+      <div className="slider">
+        <div className="slider-label">Distance: {this.state.distance} m.</div>
         <Slider
+          className="slider-inner"
           min={1000}
           max={50000}
           step={1000}
@@ -319,8 +315,10 @@ export default class HomePage extends React.Component {
 
     const menuGeocoder = (
       <TextField
+        className="geocoder"
         ref={(elem) => { this.textFieldAddress = elem; }}
         floatingLabelText="Enter an address to look for"
+        floatingLabelFixed
         onKeyDown={(event) => this.handleAddressKeyDown(event)}
         value={this.state.valueAddress}
         onChange={evt => this.handleUpdateAddressValue(evt)}
@@ -342,6 +340,7 @@ export default class HomePage extends React.Component {
     const loginPlaceholder = !this.state.currentUser ?
       (
         <MenuItem
+          className="login"
           ref={(elem) => { this.placeholderLoginGoogle = elem; }}
           primaryText={<GoogleLogin
             clientId="19471878870-td25jvej2kq8jn7n622ttutvat4lbkvm.apps.googleusercontent.com"
@@ -356,6 +355,7 @@ export default class HomePage extends React.Component {
     const logoutPlaceholder = this.state.currentUser ?
       (
         <MenuItem
+          className="logout"
           ref={(elem) => { this.placeholderLogoutGoogle = elem; }}
           primaryText={<GoogleLogout
             buttonText="Logout"
@@ -366,7 +366,7 @@ export default class HomePage extends React.Component {
       ) : null;
 
     const { values } = this.state;
-    const multiSelectSample = (
+    const multiSelectPlaces = (
       <SelectField
         className="multiselect"
         multiple
@@ -379,20 +379,17 @@ export default class HomePage extends React.Component {
       </SelectField>
     );
 
-    const MainMenu = (
-      <div style={{ marginTop: '-30px' }}>
-        <Paper style={style}>
-          <Menu>
-            {myProfilePlaceholder}
-            {loginPlaceholder}
-            {logoutPlaceholder}
-
-            {multiSelectSample}
-            <MenuItem primaryText={SliderExampleSimple} />
-            <MenuItem primaryText="Help &amp; feedback" />
-            {menuGeocoder}
-
-            {/* <MenuItem
+    const mainMenu = (
+      <Paper className="main-menu-paper">
+        <Menu className="main-menu">
+          {myProfilePlaceholder}
+          {loginPlaceholder}
+          {logoutPlaceholder}
+          {multiSelectPlaces}
+          <MenuItem primaryText={sliderDistance} />
+          {menuGeocoder}
+          <MenuItem primaryText="Help &amp; feedback" />
+          {/* <MenuItem
               primaryText="Settings"
               rightIcon={<ArrowDropRight />}
               menuItems={[
@@ -408,9 +405,8 @@ export default class HomePage extends React.Component {
                 />,
               ]}
             /> */}
-          </Menu>
-        </Paper>
-      </div>
+        </Menu>
+      </Paper>
     );
 
     const menu =
@@ -419,7 +415,7 @@ export default class HomePage extends React.Component {
           <div
             role="link"
             tabIndex={0}
-            className="link"
+            className="hamburger-link"
             onClick={() => this.toogleMenu()}
             onKeyPress={(event) => {
               if (event.keyCode === 32) { this.toogleMenu(); }
@@ -427,13 +423,13 @@ export default class HomePage extends React.Component {
           >
             <i className="material-icons">dehaze</i>
           </div>
-          {this.state.menuVisible ? MainMenu : null}
+          {this.state.menuVisible ? mainMenu : null}
         </div>
       );
 
     const loaderContent =
       (
-        <div className="the-choice">
+        <div className="the-choice-overlay">
           <div className="text">
             Fix the karma of
           </div>
