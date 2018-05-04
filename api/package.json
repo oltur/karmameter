@@ -16,6 +16,7 @@
   "dependencies": {
     "moment": "^2.19.3",
     "mongo": "^0.1.0",
+    "mongodb": "^2.2.33",
     "node-env-file": "^0.1.8",
     "restify": "^6.3.4",
     "restify-cors-middleware": "^1.0.1"
