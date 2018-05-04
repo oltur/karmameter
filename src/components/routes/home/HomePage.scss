@@ -7,7 +7,8 @@
   user-select: none;
   z-index: 5;
   position: fixed;
-  left: 15px;
+  left: 5px;
+  top: -15px;
   border-radius: 5px;
   padding: 2px;
   color: grey;
@@ -17,26 +18,58 @@
     font-size: 3.2em;
     line-height: 1.6;
   }
-  .link {
+  .hamburger-link {
     text-decoration: none;
     color: inherit;
     outline: 0;
     border: none;
-    -moz-outline-style: none &:link,
-    &a:visited {
+    -moz-outline-style: none;
+    &:link,
+    &:visited {
       color: inherit;
     }
     &:hover {
       color: black;
     }
   }
+  .main-menu-paper {
+    display: inline-block;
+    margin: -20px 32px 16px 0;
+    .multiselect {
+      margin: 0 0 0 22px;
+    }
+    .slider {
+      margin: 0 0 0 6px;
+      .slider-label {
+        font-size: 12px;
+        line-height: 1;
+        color: lightgrey;
+      }
+      .slider-inner {
+        line-height: 1;
+        div {
+          margin-bottom: 0px !important;
+        }
+      }
+    }
+    .geocoder {
+      margin: 0 0 0 22px;
+    }
+    .login,
+    .logout {
+      button {
+        background: none!important;
+        color: inherit;
+        border: none;
+        padding: 0!important;
+        font: inherit;
+        cursor: pointer;
+      }
+    }
+  }
 }
 
-.multiselect {
-  margin: 0 0 0 20px;
-}
-
-.the-choice {
+.the-choice-overlay {
   .text {
     font-size: 2.4em;
     line-height: 1.6;

@@ -1,3 +1,4 @@
+/*global google*/
 import React from 'react';
 import { GoogleLogin, GoogleLogout } from 'react-google-login';
 import Button from 'components/ui/Button/Button';
@@ -6,26 +7,29 @@ import Paper from 'material-ui/Paper';
 import Menu from 'material-ui/Menu';
 import MenuItem from 'material-ui/MenuItem';
 import SelectField from 'material-ui/SelectField';
+import TextField from 'material-ui/TextField';
 import Loader from 'react-loader-advanced';
 
 import Login from 'material-ui/svg-icons/action/flight-land';
 import Logout from 'material-ui/svg-icons/action/flight-takeoff';
 import Account from 'material-ui/svg-icons/action/account-box';
-import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
+//import ArrowDropRight from 'material-ui/svg-icons/navigation-arrow-drop-right';
 
 import Slider from 'material-ui/Slider';
 
 import StorageService from '../../../tools/storage-service';
-import Map from '../../../tools/map';
+import Helpers from '../../../tools/helpers';
+import Map from '../../business/map/Map';
 import loadJS from '../../../tools/load-js';
 
 import './HomePage.scss';
 
 export default class HomePage extends React.Component {
-  constructor(props) {
-    super(props);
+  constructor() {
+    super();
 
     this.storageService = new StorageService();
+    this.geocoderService = null;
 
     this.state = {
       width: 0,
@@ -35,20 +39,19 @@ export default class HomePage extends React.Component {
       distance: 2000,
       currentUser: this.storageService.currentUser,
       menuVisible: false,
+      inputValueAddress: '',
       names: [
         'Accounting', 'Airport', 'Amusement Park', 'Aquarium', 'Art Gallery', 'Atm', 'Bakery', 'Bank', 'Bar', 'Beauty Salon', 'Bicycle Store', 'Book Store', 'Bowling Alley', 'Bus Station', 'Cafe', 'Campground', 'Car Dealer', 'Car Rental', 'Car Repair', 'Car Wash', 'Casino', 'Cemetery', 'Church', 'City Hall', 'Clothing Store', 'Convenience Store', 'Courthouse', 'Dentist', 'Department Store', 'Doctor', 'Electrician', 'Electronics Store', 'Embassy', 'Fire Station', 'Florist', 'Funeral Home', 'Furniture Store', 'Gas Station', 'Gym', 'Hair Care', 'Hardware Store', 'Hindu Temple', 'Home Goods Store', 'Hospital', 'Insurance Agency', 'Jewelry Store', 'Laundry', 'Lawyer', 'Library', 'Liquor Store', 'Local Government Office', 'Locksmith', 'Lodging', 'Meal Delivery', 'Meal Takeaway', 'Mosque', 'Movie Rental', 'Movie Theater', 'Moving Company', 'Museum', 'Night Club', 'Painter', 'Park', 'Parking', 'Pet Store', 'Pharmacy', 'Physiotherapist', 'Plumber', 'Police', 'Post Office', 'Real Estate Agency', 'Restaurant', 'Roofing Contractor', 'Rv Park', 'School', 'Shoe Store', 'Shopping Mall', 'Spa', 'Stadium', 'Storage', 'Store', 'Subway Station', 'Synagogue', 'Taxi Stand', 'Train Station', 'Transit Station', 'Travel Agency', 'University', 'Veterinary Care', 'Zoo',
       ],
-      values: [],
+      values: ['restaurant'],
     };
 
-    this.map = new Map();
-    this.mapElem = null;
-    this.service = null;
-    this.infowindow = null;
+    this.map = null;
 
     this.placeholderLoginGoogle = null;
     this.placeholderLogoutGoogle = null;
     this.placeholderProfile = null;
+    this.textFieldAddress = null;
 
     this.updateWindowDimensions = this.updateWindowDimensions.bind(this);
     this.keyDownHandler = this.keyDownHandler.bind(this);
@@ -59,6 +62,8 @@ export default class HomePage extends React.Component {
     this.loginGoogle = this.loginGoogle.bind(this);
     this.logoutGoogle = this.logoutGoogle.bind(this);
     this.errorGoogle = this.errorGoogle.bind(this);
+    this.handleAddressKeyDown = this.handleAddressKeyDown.bind(this);
+    this.handleUpdateAddressValue = this.handleUpdateAddressValue.bind(this);
   }
 
   componentDidMount() {
@@ -142,18 +147,54 @@ export default class HomePage extends React.Component {
   }
 
   initMap() {
-    this.map.initialize(this.mapElem);
+    this.geocoderService = new google.maps.Geocoder();
+    this.map.initialize();
   }
 
   handleDistanceSlider = (event, value) => {
     this.setState({ ...this.state, distance: value });
-    this.map.fillMarkers(this.state.distance);
+    this.map.distance = value;
+    this.map.fillMarkers();
   };
 
   handleChange = (event, index, values) => {
     this.setState({ ...this.state, values });
-    this.map.selectedTypes = this.state.values;
-    this.map.fillMarkers(this.state.distance);
+    this.map.selectedTypes = values;
+    this.map.distance = this.state.distance;
+    this.map.fillMarkers();
+  }
+
+  handleUpdateAddressValue(evt) {
+    this.setState({
+      ...this.state,
+      inputValueAddress: evt.target.value,
+    });
+  }
+
+  handleAddressKeyDown = (event) => {
+    // console.log(event.key);
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      console.log(this.textFieldAddress);
+      this.geocoderService.geocode(
+        {
+          address: this.state.inputValueAddress,
+        },
+        (results, status) => {
+          if (status === 'OK') {
+            this.map.position = results[0].geometry.location;
+            this.map.setPosition();
+            // map.setCenter(results[0].geometry.location);
+            // var marker = new google.maps.Marker({
+            //   map: map,
+            //   position: results[0].geometry.location
+            // });
+          } else {
+            alert('Geocode was not successful for the following reason: ' + status);
+          }
+        }
+      );
+    }
   }
 
   menuItems(values) {
@@ -163,28 +204,36 @@ export default class HomePage extends React.Component {
         insetChildren
         checked={values && values.indexOf(name) > -1}
         value={name}
-        primaryText={name}
+        primaryText={Helpers.decodeGoogleLocationName(name)}
       />
     ));
   }
 
   render() {
-    const style = {
-      display: 'inline-block',
-      margin: '16px 32px 16px 0',
-    };
-
-    const SliderExampleSimple = (
-      <div>
+    const sliderDistance = (
+      <div className="slider">
+        <div className="slider-label">Distance: {this.state.distance} m.</div>
         <Slider
+          className="slider-inner"
           min={1000}
           max={50000}
           step={1000}
           value={this.state.distance}
           onChange={this.handleDistanceSlider}
         />
-        <div style={{ fontSize: '0.8em', marginTop: '-60px' }}>(distance of {this.state.distance} meters)</div>
       </div>
+    );
+
+    const menuGeocoder = (
+      <TextField
+        className="geocoder"
+        ref={(elem) => { this.textFieldAddress = elem; }}
+        floatingLabelText="Enter an address to look for"
+        floatingLabelFixed
+        onKeyDown={(event) => this.handleAddressKeyDown(event)}
+        value={this.state.valueAddress}
+        onChange={evt => this.handleUpdateAddressValue(evt)}
+      />
     );
 
     const myProfilePlaceholder = this.state.currentUser ?
@@ -202,6 +251,7 @@ export default class HomePage extends React.Component {
     const loginPlaceholder = !this.state.currentUser ?
       (
         <MenuItem
+          className="login"
           ref={(elem) => { this.placeholderLoginGoogle = elem; }}
           primaryText={<GoogleLogin
             clientId="19471878870-td25jvej2kq8jn7n622ttutvat4lbkvm.apps.googleusercontent.com"
@@ -216,6 +266,7 @@ export default class HomePage extends React.Component {
     const logoutPlaceholder = this.state.currentUser ?
       (
         <MenuItem
+          className="logout"
           ref={(elem) => { this.placeholderLogoutGoogle = elem; }}
           primaryText={<GoogleLogout
             buttonText="Logout"
@@ -226,7 +277,7 @@ export default class HomePage extends React.Component {
       ) : null;
 
     const { values } = this.state;
-    const multiSelectSample = (
+    const multiSelectPlaces = (
       <SelectField
         className="multiselect"
         multiple
@@ -239,18 +290,17 @@ export default class HomePage extends React.Component {
       </SelectField>
     );
 
-    const MainMenu = (
-      <div style={{ marginTop: '-30px' }}>
-        <Paper style={style}>
-          <Menu>
-            {myProfilePlaceholder}
-            {loginPlaceholder}
-            {logoutPlaceholder}
-
-            {multiSelectSample}
-            <MenuItem primaryText={SliderExampleSimple} />
-            <MenuItem primaryText="Help &amp; feedback" />
-            <MenuItem
+    const mainMenu = (
+      <Paper className="main-menu-paper">
+        <Menu className="main-menu">
+          {myProfilePlaceholder}
+          {loginPlaceholder}
+          {logoutPlaceholder}
+          {multiSelectPlaces}
+          <MenuItem primaryText={sliderDistance} />
+          {menuGeocoder}
+          <MenuItem primaryText="Help &amp; feedback" />
+          {/* <MenuItem
               primaryText="Settings"
               rightIcon={<ArrowDropRight />}
               menuItems={[
@@ -265,10 +315,9 @@ export default class HomePage extends React.Component {
                   ]}
                 />,
               ]}
-            />
-          </Menu>
-        </Paper>
-      </div>
+            /> */}
+        </Menu>
+      </Paper>
     );
 
     const menu =
@@ -277,7 +326,7 @@ export default class HomePage extends React.Component {
           <div
             role="link"
             tabIndex={0}
-            className="link"
+            className="hamburger-link"
             onClick={() => this.toogleMenu()}
             onKeyPress={(event) => {
               if (event.keyCode === 32) { this.toogleMenu(); }
@@ -285,17 +334,17 @@ export default class HomePage extends React.Component {
           >
             <i className="material-icons">dehaze</i>
           </div>
-          {this.state.menuVisible ? MainMenu : null}
+          {this.state.menuVisible ? mainMenu : null}
         </div>
       );
 
     const loaderContent =
       (
-        <div className="the-choice">
+        <div className="the-choice-overlay">
           <div className="text">
             Fix the karma of
           </div>
-          <div className="name" dangerouslySetInnerHTML={{ __html: this.state.loaderText }}></div>
+          <div className="name" dangerouslySetInnerHTML={{ __html: this.state.loaderText }} />
           <div className="buttons">
             <Button onClick={() => { this.upVote(); }} theme="green"><i className="material-icons">thumb_up</i></Button>
             <Button onClick={() => { this.downVote(); }} theme="red"><i className="material-icons">thumb_down</i></Button>
@@ -320,11 +369,15 @@ export default class HomePage extends React.Component {
       <Loader show={this.state.loaderVisible} message={loaderContent}>
         <div>
           {menu}
-          <div
+          <Map
+            ref={(elem) => { this.map = elem; }}
+            height={this.state.height}
+          />
+          {/* <div
             ref={(elem) => { this.mapElem = elem; }}
             className="map"
             style={{ height: this.state.height }}
-          />
+          /> */}
 
         </div>
       </Loader>
