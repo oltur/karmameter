@@ -17,6 +17,11 @@ const stylesLoaders = [
     options: { minimize: production },
   },
   'postcss-loader',
+  // NOTE: this pinned sass-loader version hardcodes `require('node-sass')`
+  // with no configurable implementation - node-sass's native build can't
+  // compile on any system with only Python 3 available. Local dev/build
+  // works around this with an uncommitted node_modules/node-sass shim that
+  // re-exports `sass` (Dart Sass, already a devDependency) - see NOTES.md.
   'sass-loader',
   {
     loader: 'sass-resources-loader',

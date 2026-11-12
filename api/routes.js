@@ -1,6 +1,7 @@
 'use strict'
 
 var moment = require('moment');
+var axios = require('axios');
 
 const {Client} = require("@googlemaps/google-maps-services-js");
 
@@ -59,6 +60,36 @@ module.exports = function (ctx) {
         next()
 
     })
+
+    server.get('/places/photo', async (req, res, next) => {
+        const photoRef = req.query.ref;
+        const maxwidth = parseInt(req.query.maxwidth, 10) || 220;
+        if (!photoRef) {
+            res.send(400, { message: 'missing ref' });
+            next();
+            return;
+        }
+        try {
+            const r = await axios.get('https://maps.googleapis.com/maps/api/place/photo', {
+                params: {
+                    photoreference: photoRef,
+                    maxwidth: maxwidth,
+                    key: process.env.GOOGLE_MAPS_API_KEY
+                },
+                responseType: 'arraybuffer'
+            });
+            res.writeHead(200, {
+                'Content-Type': r.headers['content-type'] || 'image/jpeg',
+                'Cache-Control': 'public, max-age=86400'
+            });
+            res.end(r.data);
+            next();
+        } catch (err) {
+            console.log('places/photo failed:', err.message);
+            res.send(502, { message: 'photo fetch failed' });
+            next();
+        }
+   })
 
     server.get('/places/:id', (req, res, next) => {
         next()

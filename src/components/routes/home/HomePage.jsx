@@ -1,7 +1,6 @@
 /*global google*/
 import React from 'react';
 import debounce from 'lodash/debounce';
-import { GoogleLogin, GoogleLogout } from 'react-google-login';
 import Button from 'components/ui/Button/Button';
 
 import Paper from 'material-ui/Paper';
@@ -31,13 +30,20 @@ import './HomePage.scss';
 // was deleted on Google's side at some point ("Error 401: deleted_client").
 // Recreated 2026-11-12 as a fresh Web application OAuth client restricted to
 // https://karmameter.net / https://www.karmameter.net. Only the Client ID
-// goes here - this is a client-side-only Sign-In flow and never needs (or
-// should ever be given) the matching client secret.
+// goes here - this is a client-side-only flow and never needs (or should
+// ever be given) the matching client secret.
 const GOOGLE_OAUTH_CLIENT_ID = '1048915032471-9q645get1onsk8lt5l847tceisqu7aq3.apps.googleusercontent.com';
 
 // Public, browser-restricted (HTTP referrer) Maps JavaScript API key -
 // restricted to this domain in Google Cloud Console, same as it ships today.
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBjBVO0J-a0PT30d-9lieKa9ygFnN8J1GA';
+
+// Geolocation options shared by the initial-load and "go to current
+// location" lookups. No timeout was set here originally, which meant a
+// permission prompt that never got answered (slow user, or an automated/
+// embedded browser context with no one to click it) left the lookup pending
+// forever instead of failing gracefully.
+const GEOLOCATION_OPTIONS = { timeout: 10000, maximumAge: 60000 };
 
 export default class HomePage extends React.Component {
   constructor() {
@@ -47,15 +53,20 @@ export default class HomePage extends React.Component {
     this.apiService = new ApiService();
     this.locationProvider = new LocationProvider();
     this.geocoderService = null;
+    this.tokenClient = null;
 
     this.state = {
       isLoaded: false,
       width: 0,
       height: 0,
       loaderVisible: false,
-      loaderText: '',
+      loaderVoteText: '',
+      loaderPlace: null,
+      helpVisible: false,
       distance: 1000,
-      currentUser: this.storageService.getData('user', 'current'),
+      // Confirmed: not read from storageService - every page load starts
+      // signed out, regardless of a previous session.
+      currentUser: null,
       menuVisible: false,
       inputValueAddress: '',
       names: [
@@ -87,11 +98,13 @@ export default class HomePage extends React.Component {
     this.keyDownHandler = this.keyDownHandler.bind(this);
 
     this.showOverlay = this.showOverlay.bind(this);
+    this.closeMenu = this.closeMenu.bind(this);
     this.upVote = this.upVote.bind(this);
     this.downVote = this.downVote.bind(this);
-    this.loginGoogle = this.loginGoogle.bind(this);
     this.logoutGoogle = this.logoutGoogle.bind(this);
-    this.errorGoogle = this.errorGoogle.bind(this);
+    this.handleOauthToken = this.handleOauthToken.bind(this);
+    this.voteFromMarker = this.voteFromMarker.bind(this);
+    this.recenterToCurrentLocation = this.recenterToCurrentLocation.bind(this);
     this.setPosition = this.setPosition.bind(this);
     this.retrievePlaces = this.retrievePlaces.bind(this);
     this.handleAddressKeyDown = this.handleAddressKeyDown.bind(this);
@@ -103,13 +116,89 @@ export default class HomePage extends React.Component {
     window.HomePage = this;
     loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&callback=HomePage.initMap`);
     window.addEventListener('resize', this.updateWindowDimensions);
-
     document.addEventListener('keydown', this.keyDownHandler, false);
+    this.loadGoogleIdentityServices();
   }
 
   componentWillUnmount() {
     window.removeEventListener('resize', this.updateWindowDimensions);
     document.removeEventListener('keydown', this.keyDownHandler, false);
+  }
+
+  // Confirmed from production: every state update is persisted (debug/
+  // crash-recovery trail, nothing currently reads it back on mount), and a
+  // change to distance/position/selectedTypes re-triggers retrievePlaces()
+  // here too, on top of whichever setState callback already did so above -
+  // redundant but harmless, matching the live behavior exactly.
+  componentDidUpdate(prevProps, prevState) {
+    this.storageService.setData('state', 'current', this.state);
+    if (
+      this.state.distance !== prevState.distance ||
+      this.state.position !== prevState.position ||
+      this.state.selectedTypes !== prevState.selectedTypes
+    ) {
+      try {
+        this.retrievePlaces();
+      } catch (e) {
+        // matches production - swallowed
+      }
+    }
+  }
+
+  // Sign-In went through two prior approaches this session before landing
+  // here, in order:
+  //   1. react-google-login (legacy gapi.auth2) - the OAuth client it used
+  //      was deleted on Google's side ("Error 401: deleted_client").
+  //   2. Google Identity Services' ID-token button (google.accounts.id.
+  //      initialize + renderButton) - worked in principle, but the branded
+  //      button rendered into a plain MenuItem.primaryText element via a
+  //      ref, and that ref reliably failed to fire at the right time through
+  //      this old Material-UI version's handling of element (vs string)
+  //      primaryText - the button silently never appeared on a real, fresh
+  //      page load, only when manually retried.
+  // The OAuth 2.0 popup token-client flow below sidesteps all of that: no
+  // iframe/button widget to render at all, just a plain "Log in" click that
+  // opens Google's real popup directly.
+  loadGoogleIdentityServices() {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = () => {
+      try {
+        this.tokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_OAUTH_CLIENT_ID,
+          scope: 'openid profile email',
+          callback: (tokenResponse) => this.handleOauthToken(tokenResponse),
+        });
+        this.setState({ ...this.state, gisReady: true });
+      } catch (e) {
+        console.log('GIS init failed', e);
+      }
+    };
+    document.head.appendChild(script);
+  }
+
+  handleOauthToken(tokenResponse) {
+    if (!tokenResponse || !tokenResponse.access_token) {
+      return;
+    }
+    fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+    })
+      .then(r => r.json())
+      .then((info) => {
+        this.setCurrentUser({
+          profileObj: {
+            googleId: info.sub,
+            imageUrl: info.picture,
+            email: info.email,
+            name: info.name,
+            givenName: info.given_name,
+            familyName: info.family_name,
+          },
+        });
+      })
+      .catch(e => console.log('userinfo fetch failed', e));
   }
 
   toogleMenu() {
@@ -119,52 +208,78 @@ export default class HomePage extends React.Component {
     });
   }
 
-  // KNOWN ISSUE (under separate, live investigation as of 2026-11-12):
-  // after a successful Google Sign-In, the menu still shows "Anonymous"
-  // instead of the signed-in user's name. loginGoogle() is reconstructed
-  // here faithfully to the best of our knowledge; the actual root cause
-  // (e.g. a response-shape mismatch between the react-google-login version
-  // in use and this code's `response.profileObj` assumption, or a stale
-  // render) had not been pinned down yet when this branch was written.
-  loginGoogle(response) {
-    this.setState({
-      ...this.state,
-      currentUser: response,
-    });
-    this.storageService.setData('user', 'current', response);
+  closeMenu() {
+    if (this.state.menuVisible) {
+      this.setState({ ...this.state, menuVisible: false });
+    }
   }
 
-  errorGoogle(response) {
-    console.log(response);
+  setCurrentUser(userData) {
+    // Confirmed: no storageService persistence - signing in only affects
+    // this render, a refresh always starts signed out again.
+    this.setState({
+      ...this.state,
+      currentUser: userData,
+    });
   }
 
   logoutGoogle() {
-    this.setState({
-      ...this.state,
-      currentUser: null,
-    });
-    this.storageService.setData('user', 'current', null);
+    this.setCurrentUser(null);
   }
 
-  showOverlay(show, id) {
-    this.setState({
-      ...this.state,
-      loaderVisible: show,
-      loaderText: id,
-    });
+  showOverlay(show, voteText = '', place = null, isNewPlaceForm = false, newPlaceLocation = null) {
+    if (isNewPlaceForm) {
+      this.setState({
+        ...this.state,
+        loaderVisible: show,
+        loaderVoteText: '',
+        newPlaceName: '',
+        newPlaceSelectedTypes: [],
+        newPlaceLocation,
+      });
+    } else {
+      this.setState({
+        ...this.state,
+        loaderVisible: show,
+        loaderVoteText: voteText,
+        loaderPlace: place,
+        newPlaceLocation,
+      });
+    }
   }
 
-  upVote() {
+  // Invoked from the raw HTML onclick inside a marker's hover tooltip
+  // (google.maps.InfoWindow content isn't part of the React tree, so it
+  // can only call back in through window.HomePage) - looks the place up by
+  // id from state rather than relying on any global registry.
+  voteFromMarker(placeId) {
+    const place = this.state.places.find(p => p.place_id === placeId);
+    if (!place) {
+      return;
+    }
+    const typeText = Helpers.decodeGoogleLocationName(place.types[0]);
+    this.showOverlay(true, `${place.name}<br/>(${typeText})`, place);
+  }
+
+  upVote(place) {
+    this.apiService.updatePlaceRating(place, true);
     this.setState({
       ...this.state,
       loaderVisible: false,
+      loaderVoteText: '',
+    }, () => {
+      this.retrievePlaces();
     });
   }
 
-  downVote() {
+  downVote(place) {
+    this.apiService.updatePlaceRating(place, false);
     this.setState({
       ...this.state,
       loaderVisible: false,
+      loaderVoteText: '',
+    }, () => {
+      this.retrievePlaces();
     });
   }
 
@@ -175,13 +290,14 @@ export default class HomePage extends React.Component {
   keyDownHandler(event) {
     if (event.keyCode === 27) {
       this.showOverlay(false);
+      this.closeMenu();
     }
   }
 
   initMap() {
     this.geocoderService = new google.maps.Geocoder();
     this.map.initialize();
-    this.locationProvider.getPosition()
+    this.locationProvider.getPosition(GEOLOCATION_OPTIONS)
       .then((position) => {
         this.setPosition(new google.maps.LatLng(position.coords.latitude, position.coords.longitude));
         this.retrievePlaces();
@@ -201,12 +317,27 @@ export default class HomePage extends React.Component {
       });
   }
 
+  // Same geolocation success/failure handling as initMap(), triggered by
+  // the map's "go to current location" button instead of the initial load.
+  recenterToCurrentLocation() {
+    this.locationProvider.getPosition(GEOLOCATION_OPTIONS)
+      .then((position) => {
+        this.setPosition(new google.maps.LatLng(position.coords.latitude, position.coords.longitude));
+        this.retrievePlaces();
+      })
+      .catch((err) => {
+        if (err.code === 1) {
+          alert(
+            "Karma Meter needs your location to show nearby places. Please allow location " +
+            "access for this site in your browser's settings, then reload the page.",
+          );
+        } else {
+          alert(`Could not get your location (${err && err.message || 'unknown error'}). Showing a default location instead.`);
+        }
+      });
+  }
+
   setPosition(position) {
-    // NOTE: inferred - HomePage now owns `position` in its own state and
-    // hands it down to <Map position={...} />, which reacts to the prop
-    // change in componentWillReceiveProps. The exact method body (e.g.
-    // whether it also re-centers synchronously) was not confirmed from the
-    // minified bundle beyond "it updates state.position".
     this.setState({
       ...this.state,
       position,
@@ -239,10 +370,11 @@ export default class HomePage extends React.Component {
     });
   };
 
-  handleChange = (event, index, selectedTypes) => {
+  handleTypesChange = (event, index, selectedTypes) => {
     this.setState({ ...this.state, selectedTypes }, () => {
       this.retrievePlaces();
     });
+    this.closeMenu();
   }
 
   handleUpdateAddressValue(evt) {
@@ -261,7 +393,7 @@ export default class HomePage extends React.Component {
         },
         (results, status) => {
           if (status === 'OK') {
-            this.setPosition(results[0].geometry.location);
+            this.setState({ ...this.state, position: results[0].geometry.location, menuVisible: false });
             this.retrievePlaces();
           } else {
             alert('Geocode was not successful for the following reason: ' + status);
@@ -269,6 +401,15 @@ export default class HomePage extends React.Component {
         },
       );
     }
+  }
+
+  openHelp = () => {
+    this.closeMenu();
+    this.setState({ ...this.state, helpVisible: true });
+  }
+
+  closeHelp = () => {
+    this.setState({ ...this.state, helpVisible: false });
   }
 
   menuItems() {
@@ -308,29 +449,37 @@ export default class HomePage extends React.Component {
       />
     );
 
+    const profileIcon = (this.state.currentUser && this.state.currentUser.profileObj.imageUrl)
+      ? <img src={this.state.currentUser.profileObj.imageUrl} style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' }} />
+      : <Account />;
+
     const myProfilePlaceholder = this.state.currentUser ?
       (
         <MenuItem
           ref={(elem) => { this.placeholderProfile = elem; }}
           primaryText={this.state.currentUser.profileObj.name}
-          leftIcon={<Account />}
+          leftIcon={profileIcon}
         />
       ) :
       (
         <MenuItem ref={(elem) => { this.placeholderProfile = elem; }} primaryText="Anonymous" leftIcon={<Account />} />
       );
 
+    // Explicitly a plain text trigger, not Google's branded Sign-In button -
+    // see the comment on loadGoogleIdentityServices() for why.
     const loginPlaceholder = !this.state.currentUser ?
       (
         <MenuItem
           className="login"
           ref={(elem) => { this.placeholderLoginGoogle = elem; }}
-          primaryText={<GoogleLogin
-            clientId={GOOGLE_OAUTH_CLIENT_ID}
-            buttonText="Login"
-            onSuccess={this.loginGoogle}
-            onFailure={this.errorGoogle}
-          />}
+          primaryText={(
+            <div
+              onClick={() => this.tokenClient && this.tokenClient.requestAccessToken()}
+              style={{ cursor: 'pointer' }}
+            >
+              Log in
+            </div>
+          )}
           leftIcon={<Login />}
         />
       ) : null;
@@ -340,10 +489,11 @@ export default class HomePage extends React.Component {
         <MenuItem
           className="logout"
           ref={(elem) => { this.placeholderLogoutGoogle = elem; }}
-          primaryText={<GoogleLogout
-            buttonText="Logout"
-            onLogoutSuccess={this.logoutGoogle}
-          />}
+          primaryText={(
+            <div onClick={() => this.logoutGoogle()} style={{ cursor: 'pointer' }}>
+              Logout
+            </div>
+          )}
           leftIcon={<Logout />}
         />
       ) : null;
@@ -353,10 +503,28 @@ export default class HomePage extends React.Component {
         className="places-category"
         floatingLabelText="Choose places category"
         value={this.state.selectedTypes}
-        onChange={this.handleChange}
+        onChange={this.handleTypesChange}
       >
         {this.menuItems()}
       </SelectField>
+    );
+
+    // Replaced the generic Material "dehaze" hamburger glyph with the app's
+    // own logo mark (a bold blue-circle "K", same as the favicon - the old
+    // tiny "KARMA" wordmark was illegible at real favicon sizes). The
+    // marginTop compensates for `.menu { top: -15px }` in HomePage.scss,
+    // which was tuned for the old font-icon's own line-height padding and
+    // clips a plain SVG div without it.
+    const hamburgerIcon = (
+      <div
+        style={{ marginTop: '15px', display: 'inline-block' }}
+        dangerouslySetInnerHTML={{
+          __html: '<svg width="28" height="28" viewBox="0 0 28 28">' +
+            '<circle cx="14" cy="14" r="13" fill="#2a78d6"/>' +
+            '<text x="14" y="19.5" font-family="Arial,Helvetica,sans-serif" font-weight="900" ' +
+            'font-size="16" fill="#fff" text-anchor="middle">K</text></svg>',
+        }}
+      />
     );
 
     const mainMenu = (
@@ -368,7 +536,7 @@ export default class HomePage extends React.Component {
           {placesCategory}
           <MenuItem primaryText={sliderDistance} />
           {menuGeocoder}
-          <MenuItem primaryText="Help &amp; feedback" />
+          <MenuItem primaryText="Help &amp; feedback" onClick={this.openHelp} />
         </Menu>
       </Paper>
     );
@@ -385,22 +553,49 @@ export default class HomePage extends React.Component {
               if (event.keyCode === 32) { this.toogleMenu(); }
             }}
           >
-            <i className="material-icons">dehaze</i>
+            {hamburgerIcon}
           </div>
           {this.state.menuVisible ? mainMenu : null}
         </div>
       );
 
+    const placePhotoUrl = (this.state.loaderPlace && this.state.loaderPlace.photos && this.state.loaderPlace.photos[0])
+      ? Helpers.getPhotoUrl(this.state.loaderPlace.photos[0].photo_reference, 360)
+      : null;
+
     const loaderContent =
       (
-        <div className="the-choice-overlay">
+        // Click-anywhere-to-dismiss - deliberately only on this branch, not
+        // the "add new place" form below, so a stray click can't silently
+        // discard whatever the user was typing there.
+        <div className="the-choice-overlay" onClick={() => this.showOverlay(false)}>
           <div className="text">
             Fix the karma of
           </div>
-          <div className="name" dangerouslySetInnerHTML={{ __html: this.state.loaderText }} />
+          <div className="name" dangerouslySetInnerHTML={{ __html: this.state.loaderVoteText }} />
+          {placePhotoUrl && (
+            <img
+              src={placePhotoUrl}
+              onError={(e) => { e.target.style.display = 'none'; }}
+              style={{
+                display: 'block', margin: '0 auto 16px auto', width: '100%',
+                maxWidth: '360px', height: '220px', objectFit: 'cover', borderRadius: '8px',
+              }}
+            />
+          )}
+          {this.state.loaderPlace && this.state.loaderPlace.url && (
+            <a
+              href={this.state.loaderPlace.url}
+              target="_blank"
+              rel="noopener"
+              style={{ display: 'block', marginBottom: '8px', fontSize: '13px' }}
+            >
+              View on Google Maps
+            </a>
+          )}
           <div className="buttons">
-            <Button onClick={() => { this.upVote(); }} theme="green"><i className="material-icons">thumb_up</i></Button>
-            <Button onClick={() => { this.downVote(); }} theme="red"><i className="material-icons">thumb_down</i></Button>
+            <Button onClick={() => { this.upVote(this.state.loaderPlace); }} theme="green"><i className="material-icons">thumb_up</i></Button>
+            <Button onClick={() => { this.downVote(this.state.loaderPlace); }} theme="red"><i className="material-icons">thumb_down</i></Button>
           </div>
           <div className="links">
             <div
@@ -417,10 +612,60 @@ export default class HomePage extends React.Component {
         </div>
       );
 
+    const helpOverlay = this.state.helpVisible && (
+      <div
+        style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,.5)',
+          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+        onClick={this.closeHelp}
+      >
+        <div
+          style={{
+            background: '#fff', maxWidth: 420, width: '90%', borderRadius: 8, padding: 24,
+            boxShadow: '0 4px 24px rgba(0,0,0,.3)', fontFamily: 'system-ui,-apple-system,Segoe UI,sans-serif',
+            color: '#222', maxHeight: '85vh', overflow: 'auto',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>About Karma Meter</h2>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={this.closeHelp}
+              style={{ cursor: 'pointer', fontSize: 22, lineHeight: 1, color: '#888', padding: '0 4px' }}
+            >
+              &times;
+            </span>
+          </div>
+          <p style={{ margin: '0 0 12px', fontSize: 14, lineHeight: 1.5 }}>
+            Karma Meter shows nearby places on the map, color-coded by their community rating, and lets you weigh in on them.
+          </p>
+          <ul style={{ margin: '0 0 16px', paddingLeft: 20, fontSize: 14, lineHeight: 1.7 }}>
+            <li>Markers are colored by rating: red (bad) through green (good), gray for no rating yet.</li>
+            <li>Hover a marker for a preview photo and a link to view it on Google Maps.</li>
+            <li>Click a marker to fix its karma &mdash; vote it up or down.</li>
+            <li>Use the category dropdown and distance slider to change what shows up nearby.</li>
+            <li>Type an address and press Enter to search a different location.</li>
+            <li>Tap the target button on the map to jump back to your current location.</li>
+            <li>Sign in with Google so your votes are attributed to your name.</li>
+          </ul>
+          <p style={{ margin: 0, fontSize: 14 }}>
+            Questions or feedback?{' '}
+            <a href="mailto:olturua@gmail.com?subject=Karma%20Meter%20feedback" style={{ color: '#2a78d6' }}>
+              olturua@gmail.com
+            </a>
+          </p>
+        </div>
+      </div>
+    );
+
     const result = (
       <Loader show={this.state.loaderVisible} message={loaderContent}>
         <div>
           {menu}
+          {helpOverlay}
           <Map
             ref={(elem) => { this.map = elem; }}
             height={this.state.height}
@@ -430,6 +675,7 @@ export default class HomePage extends React.Component {
             distance={this.state.distance}
             setPosition={this.setPosition}
             showOverlay={this.showOverlay}
+            closeMenu={this.closeMenu}
           />
         </div>
       </Loader>

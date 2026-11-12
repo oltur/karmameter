@@ -23,6 +23,7 @@ export default class Map extends React.Component {
     distance: PropTypes.number,
     setPosition: PropTypes.func,
     showOverlay: PropTypes.func,
+    closeMenu: PropTypes.func,
   }
 
   constructor(props) {
@@ -65,6 +66,12 @@ export default class Map extends React.Component {
   }
 
   onMapClick(event) {
+    // Closing the main hamburger menu on any map click is a deliberate UX
+    // fix (menu previously had no way to close except re-clicking the
+    // hamburger) - do this regardless of whether the click also opens the
+    // "add place" popup below.
+    this.props.closeMenu && this.props.closeMenu();
+
     if (!event.pixel) {
       return;
     }
@@ -139,6 +146,8 @@ export default class Map extends React.Component {
       clickable: false,
     });
 
+    this.addLocateMeControl();
+
     google.maps.event.addListener(this.googleMap, 'click', (event) => {
       this.onMapClick(event);
     });
@@ -149,6 +158,32 @@ export default class Map extends React.Component {
 
     this.setMapPosition();
     this.fillMarkers();
+  }
+
+  // Custom "go to current location" control - the map has no built-in
+  // My Location button, so this one calls back into HomePage to re-run
+  // geolocation and recenter.
+  addLocateMeControl() {
+    const button = document.createElement('div');
+    button.title = 'Go to current location';
+    button.style.cssText = 'background:#fff;border-radius:2px;box-shadow:0 1px 4px rgba(0,0,0,.3);' +
+      'cursor:pointer;margin:10px;width:40px;height:40px;display:flex;align-items:center;justify-content:center';
+    button.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#555">' +
+      '<path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06' +
+      'C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06z' +
+      'M12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>';
+    button.addEventListener('click', () => {
+      button.style.opacity = '0.4';
+      setTimeout(() => { button.style.opacity = '1'; }, 600);
+      if (window.HomePage && window.HomePage.recenterToCurrentLocation) {
+        try {
+          window.HomePage.recenterToCurrentLocation();
+        } catch (err) {
+          console.log('recenterToCurrentLocation threw:', err);
+        }
+      }
+    });
+    this.googleMap.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(button);
   }
 
   setPositionByLastClickLocation() {
@@ -204,7 +239,20 @@ export default class Map extends React.Component {
     const ratingText = place.average_rating === -1 ? 'NA' : `${Math.round(place.average_rating * 10) / 10} / 5`;
     const typeText = Helpers.decodeGoogleLocationName(place.types[0]);
     place.displayText = `${place.name.replace(/'/g, '&#39;')}<br/>${ratingText}</br/>(${typeText})`;
-    const content = `<span onclick="window.HomePage.showOverlay(true,'${place.name}<br/>(${typeText})'); return false;" >${place.displayText}</span>`;
+
+    const photoUrl = place.photos && place.photos[0] && place.photos[0].photo_reference
+      ? Helpers.getPhotoUrl(place.photos[0].photo_reference, 220)
+      : null;
+
+    // The whole tooltip (minus the Maps link, which stops propagation so it
+    // navigates instead) is clickable to open the up/down-vote flow - a
+    // quicker path than requiring the user to click the marker pin itself.
+    const content = '<div style="max-width:220px;cursor:pointer" ' +
+      `onclick="window.HomePage.voteFromMarker('${place.place_id}'); return false;">` +
+      (photoUrl ? `<img src="${photoUrl}" style="width:100%;border-radius:4px;margin-bottom:4px;display:block"/>` : '') +
+      `<div>${place.displayText}</div>` +
+      (place.url ? `<a href="${place.url}" target="_blank" rel="noopener" style="font-size:12px" onclick="event.stopPropagation()">View on Google Maps</a>` : '') +
+      '</div>';
 
     google.maps.event.addListener(marker, 'mouseover', () => {
       this.infowindow.setContent(content);
@@ -212,7 +260,7 @@ export default class Map extends React.Component {
     });
 
     google.maps.event.addListener(marker, 'click', () => {
-      this.props.showOverlay(true, `${place.name}<br/>(${typeText})`);
+      this.props.showOverlay(true, `${place.name}<br/>(${typeText})`, place);
     });
   }
 

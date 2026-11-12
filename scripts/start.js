@@ -11,6 +11,19 @@ const serverConfig = {
   stats: { colors: true },
   hot: true,
   historyApiFallback: true,
+  // The bundled fsevents/chokidar version predates Node's current native
+  // module ABI and crashes the dev server outright on modern macOS/Node -
+  // poll instead of relying on native OS file-watching.
+  watchOptions: { poll: 1000 },
+  // Forward /api/* to the local karmameter-api server (see api/, run with
+  // `npm start` on its default port 3000) the same way nginx does in
+  // production (strips the /api prefix before proxying).
+  proxy: {
+    '/api': {
+      target: 'http://localhost:3000',
+      pathRewrite: { '^/api': '' },
+    },
+  },
 };
 
 new WebpackDevServer(webpack(webpackConfig), serverConfig)
