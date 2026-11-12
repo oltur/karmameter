@@ -34,7 +34,9 @@
   }
   .main-menu-paper {
     display: inline-block;
-    margin: -20px 32px 16px 0;
+    // -35px (not -20px): must fully cover the 40px logo icon (was 28px when
+    // -20px was tuned) so the open menu doesn't leave it peeking out above.
+    margin: -35px 32px 16px 0;
     .multiselect {
       margin: 0 0 0 22px;
     }

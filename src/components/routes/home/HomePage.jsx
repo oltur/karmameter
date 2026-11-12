@@ -209,9 +209,13 @@ export default class HomePage extends React.Component {
   }
 
   closeMenu() {
-    if (this.state.menuVisible) {
-      this.setState({ ...this.state, menuVisible: false });
-    }
+    // Must use the functional updater, not a `{...this.state, ...}` copy taken
+    // at call time: this is frequently called right after another setState
+    // in the same handler (e.g. handleTypesChange), and React batches both
+    // calls together. A stale-snapshot copy here would silently stomp
+    // whatever the preceding call just set back to its old value - this
+    // exact bug shipped and broke the category dropdown in production.
+    this.setState((prevState) => (prevState.menuVisible ? { ...prevState, menuVisible: false } : prevState));
   }
 
   setCurrentUser(userData) {
@@ -404,8 +408,10 @@ export default class HomePage extends React.Component {
   }
 
   openHelp = () => {
-    this.closeMenu();
-    this.setState({ ...this.state, helpVisible: true });
+    // One atomic update, not closeMenu() + a separate setState - two
+    // chained stale-snapshot setState calls in the same handler stomp each
+    // other (see the comment on closeMenu above).
+    this.setState((prevState) => ({ ...prevState, menuVisible: false, helpVisible: true }));
   }
 
   closeHelp = () => {
@@ -519,10 +525,10 @@ export default class HomePage extends React.Component {
       <div
         style={{ marginTop: '15px', display: 'inline-block' }}
         dangerouslySetInnerHTML={{
-          __html: '<svg width="28" height="28" viewBox="0 0 28 28">' +
-            '<circle cx="14" cy="14" r="13" fill="#2a78d6"/>' +
-            '<text x="14" y="19.5" font-family="Arial,Helvetica,sans-serif" font-weight="900" ' +
-            'font-size="16" fill="#fff" text-anchor="middle">K</text></svg>',
+          __html: '<svg width="40" height="40" viewBox="0 0 40 40">' +
+            '<circle cx="20" cy="20" r="19" fill="#2a78d6"/>' +
+            '<text x="20" y="27.5" font-family="Arial,Helvetica,sans-serif" font-weight="900" ' +
+            'font-size="23" fill="#fff" text-anchor="middle">K</text></svg>',
         }}
       />
     );
