@@ -1,0 +1,18 @@
+diff --git a/node_modules/restify/lib/server.js b/node_modules/restify/lib/server.js
+index 245937c..a3c2b45 100644
+--- a/node_modules/restify/lib/server.js
++++ b/node_modules/restify/lib/server.js
+@@ -1017,7 +1017,12 @@ Server.prototype._run = function _run(req, res, route, chain, cb) {
+     function _requestAborted() {
+         req._connectionState = 'aborted';
+     }
+-    req.once('close', _requestClose);
++    // NOTE: req.once('close', ...) intentionally not wired up: on modern Node
++    // (13+) the request 'close' event fires once the request body has been
++    // fully read, not only on a genuine client disconnect, which made
++    // response.js.__send() wrongly force status 444 on any handler that
++    // responds asynchronously (e.g. after an await/Promise). 'aborted'
++    // (a real abort signal) is left intact.
+     req.once('aborted', _requestAborted);
+ 
+     // attach a listener for the response's 'redirect' event

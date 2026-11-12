@@ -1,8 +1,8 @@
 'use strict'
 
   var env = require('node-env-file');
- 
-  // Load any undefined ENV variables form a specified file. 
+
+  // Load any undefined ENV variables form a specified file.
   env(__dirname + '/.env');
 
 
@@ -12,7 +12,7 @@
 const config  = require('./config'),
       restify = require('restify'),
       mongodb = require('mongodb').MongoClient
-      
+
 /**
  * Initialize Server
  */
@@ -45,12 +45,14 @@ server.use(restify.plugins.fullResponse())
 server.listen(config.port, () => {
 
     // establish connection to mongodb atlas
-    mongodb.connect(config.db.uri, (err, db) => {
+    mongodb.connect(config.db.uri, { useNewUrlParser: true, useUnifiedTopology: true }, (err, client) => {
 
         if (err) {
             console.log('An error occurred while attempting to connect to MongoDB', err)
             process.exit(1)
         }
+
+        const db = client.db()
 
         console.log(
             '%s v%s ready to accept connections on port %s in %s environment.',
