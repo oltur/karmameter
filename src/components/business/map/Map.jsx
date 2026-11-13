@@ -35,6 +35,7 @@ export default class Map extends React.Component {
     closeMenu: PropTypes.func,
     currentUser: PropTypes.object,
     mapViewMode: PropTypes.oneOf(['flat', 'tilted', 'photorealistic']),
+    openAddPlaceForm: PropTypes.func,
   }
 
   constructor(props) {
@@ -50,6 +51,7 @@ export default class Map extends React.Component {
 
     this.menuAnchor = null;
     this.map3dElem = null;
+    this.markers3dArray = [];
     // undefined until importLibrary('maps3d') resolves/rejects the first
     // time the "Photorealistic 3D" view is selected - avoids loading that
     // (separately billed) library's tiles before it's actually asked for.
@@ -117,6 +119,7 @@ export default class Map extends React.Component {
       this.map3dLoadPromise = google.maps.importLibrary('maps3d')
         .then(() => {
           this.setState({ ...this.state, map3dError: null });
+          this.render3dMarkers(this.props.places);
         })
         .catch((err) => {
           // Most likely cause: the Map Tiles API isn't enabled (or billing
@@ -128,6 +131,11 @@ export default class Map extends React.Component {
             map3dError: 'Photorealistic 3D Tiles unavailable - enable the "Map Tiles API" (and billing) for this project in Google Cloud Console.',
           });
         });
+    } else {
+      // Already loaded once before (switching back from flat/tilted) -
+      // markers were kept in the DOM, but re-sync in case places changed
+      // while this view was hidden.
+      this.render3dMarkers(this.props.places);
     }
   }
 
@@ -138,6 +146,86 @@ export default class Map extends React.Component {
     if (this.map3dElem) {
       this.map3dElem.style.display = 'none';
     }
+  }
+
+  // Mirrors fillMarkers()/createMarker() for the Photorealistic 3D view -
+  // google.maps.Marker only attaches to a 2D google.maps.Map, so <gmp-map-3d>
+  // needs its own marker type (Marker3DInteractiveElement) from the same
+  // maps3d library, appended as real DOM children of the map element.
+  render3dMarkers(places) {
+    if (!this.map3dElem || !(google.maps && google.maps.maps3d) || !places) {
+      return;
+    }
+    this.clear3dMarkers();
+    for (let i = 0; i < places.length; i++) {
+      this.create3dMarker(places[i]);
+    }
+  }
+
+  clear3dMarkers() {
+    for (let i = 0; i < this.markers3dArray.length; i++) {
+      const marker = this.markers3dArray[i];
+      if (marker.parentNode) {
+        marker.parentNode.removeChild(marker);
+      }
+    }
+    this.markers3dArray.length = 0;
+  }
+
+  create3dMarker(place) {
+    if (!place || !place.geometry || !place.geometry.location) {
+      return;
+    }
+    const { Marker3DInteractiveElement } = google.maps.maps3d;
+    const marker = new Marker3DInteractiveElement({
+      position: {
+        lat: place.geometry.location.lat,
+        lng: place.geometry.location.lng,
+        altitude: 0,
+      },
+    });
+
+    // Same rating-colored SVG badge as the 2D markers (getScaleImage), set
+    // as the marker's glyph instead of a google.maps.Marker icon.
+    const glyphImg = document.createElement('img');
+    glyphImg.src = this.getScaleImage(place.average_rating);
+    glyphImg.style.width = '28px';
+    glyphImg.style.height = '28px';
+    marker.glyph = glyphImg;
+
+    const typeText = Helpers.decodeGoogleLocationName(place.types[0]);
+    marker.title = `${place.name} (${typeText})`;
+
+    // Marker3DInteractiveElement (unlike the plain, non-interactive
+    // Marker3DElement) fires gmp-click - same up/down-vote overlay as a 2D
+    // marker click.
+    marker.addEventListener('gmp-click', () => {
+      this.props.showOverlay(true, `${place.name}<br/>(${typeText})`, place);
+    });
+
+    this.map3dElem.appendChild(marker);
+    this.markers3dArray.push(marker);
+  }
+
+  // The Photorealistic 3D Tiles viewer has no pixel-to-ground unprojection
+  // exposed the way the 2D map's click event hands back event.latLng/
+  // event.pixel - so "Set position"/"Add place" here target the current
+  // camera center rather than the exact point clicked. Good enough for
+  // comparison purposes; flagged clearly so it's not mistaken for the 2D
+  // view's precise click-to-location behavior.
+  onMap3dClick(event) {
+    this.props.closeMenu && this.props.closeMenu();
+    const center = this.map3dElem && this.map3dElem.center;
+    if (!center) {
+      return;
+    }
+    this.setState({
+      ...this.state,
+      popUpMenuOpen: true,
+      popUpMenuLeft: event.clientX,
+      popUpMenuTop: event.clientY,
+      lastClickLocation: { lat: center.lat, lng: center.lng },
+    });
   }
 
   onMapClick(event) {
@@ -185,6 +273,19 @@ export default class Map extends React.Component {
 
   getPosition() {
     return this.props.position || new google.maps.LatLng(31, 35);
+  }
+
+  // A coordinate from google.maps.LatLng is a method (lat()) that needs its
+  // `this` bound to the LatLng instance; one from a plain {lat, lng}
+  // literal (e.g. a LatLngAltitude from the 3D view) is just a number - both
+  // show up as `position`/`lastClickLocation`, so call via `source[key]`
+  // rather than extracting the function first (which would drop `this`).
+  static readCoord(source, key, fallback) {
+    const value = source[key];
+    if (typeof value === 'function') {
+      return value.call(source);
+    }
+    return typeof value === 'number' ? value : fallback;
   }
 
   setupMap() {
@@ -308,6 +409,10 @@ export default class Map extends React.Component {
     for (let i = 0; i < places.length; i++) {
       this.createMarker(this.props.places[i]);
     }
+    // Keeps the Photorealistic 3D view's markers in sync too, regardless of
+    // which view is currently visible - no-ops until that view has been
+    // selected at least once (guarded on google.maps.maps3d being loaded).
+    this.render3dMarkers(places);
   }
 
   createMarker(place) {
@@ -363,18 +468,16 @@ export default class Map extends React.Component {
   }
 
   addPlace() {
-    // NOTE: inferred from the pre-2026 version of this component; the exact
-    // current "add a new place" flow (which now presumably goes through
-    // ApiService.createPlace) was not reverse-engineered this session.
-    new google.maps.Marker({
-      position: this.state.lastClickLocation,
-      map: this.googleMap,
-    });
-
     this.setState({
       ...this.state,
       popUpMenuOpen: false,
     });
+    // Opens HomePage's "Add a new place" dialog (name + category, including
+    // a free-typed custom category like "Home") instead of just dropping an
+    // unlabeled, unsaved marker - see HomePage.openAddPlaceForm/submitNewPlace.
+    if (this.props.openAddPlaceForm) {
+      this.props.openAddPlaceForm(this.state.lastClickLocation);
+    }
   }
 
   handleRequestClose() {
@@ -404,9 +507,9 @@ export default class Map extends React.Component {
     // google.maps.LatLng, and `google` isn't defined yet on the very first
     // render (the Maps JS script is still loading). Default matches
     // getPosition()'s own fallback (31, 35).
-    const rawPosition = this.props.position;
-    const lat = rawPosition ? (typeof rawPosition.lat === 'function' ? rawPosition.lat() : rawPosition.lat) : 31;
-    const lng = rawPosition ? (typeof rawPosition.lng === 'function' ? rawPosition.lng() : rawPosition.lng) : 35;
+    const rawPosition = this.props.position || {};
+    const lat = Map.readCoord(rawPosition, 'lat', 31);
+    const lng = Map.readCoord(rawPosition, 'lng', 35);
 
     return (
       <div style={{ position: 'relative' }}>
@@ -425,7 +528,17 @@ export default class Map extends React.Component {
             its geometry only loads (and only bills) once the maps3d library
             has been imported and the element is visible. */}
         <gmp-map-3d
-          ref={(elem) => { this.map3dElem = elem; }}
+          ref={(elem) => {
+            this.map3dElem = elem;
+            // Plain native DOM listener, not a React onClick - gmp-map-3d is
+            // an unmanaged custom element - and guarded so the ref callback
+            // (which React can invoke more than once) only binds it once.
+            if (elem && !elem.dataset.karmaClickBound) {
+              elem.dataset.karmaClickBound = 'true';
+              elem.addEventListener('click', (event) => this.onMap3dClick(event));
+            }
+          }}
+          className="map"
           center={`${lat},${lng},200`}
           tilt="65"
           range="1200"
@@ -437,6 +550,43 @@ export default class Map extends React.Component {
             }
           }
         />
+        {this.props.mapViewMode === 'photorealistic' && (
+          <button
+            type="button"
+            title="Go to current location"
+            style={
+              {
+                position: 'absolute',
+                right: 10,
+                bottom: 10,
+                background: '#fff',
+                border: 'none',
+                borderRadius: 2,
+                boxShadow: '0 1px 4px rgba(0,0,0,.3)',
+                cursor: 'pointer',
+                width: 40,
+                height: 40,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 5,
+              }
+            }
+            onClick={() => {
+              if (window.HomePage && window.HomePage.recenterToCurrentLocation) {
+                window.HomePage.recenterToCurrentLocation();
+              }
+            }}
+            dangerouslySetInnerHTML={
+              {
+                __html: '<svg width="20" height="20" viewBox="0 0 24 24" fill="#555">' +
+                  '<path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06' +
+                  'C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06z' +
+                  'M12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>',
+              }
+            }
+          />
+        )}
         {this.state.map3dError && (
           <div
             style={

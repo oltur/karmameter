@@ -8,6 +8,8 @@ import Menu from 'material-ui/Menu';
 import MenuItem from 'material-ui/MenuItem';
 import SelectField from 'material-ui/SelectField';
 import TextField from 'material-ui/TextField';
+import AutoComplete from 'material-ui/AutoComplete';
+import Dialog from 'material-ui/Dialog';
 import Loader from 'react-loader-advanced';
 
 import Login from 'material-ui/svg-icons/action/flight-land';
@@ -89,11 +91,14 @@ export default class HomePage extends React.Component {
       places: [],
       placesVersion: 0,
       position: null,
+      // "Add a new place" dialog, opened via Map.jsx's addPlace() (the map's
+      // right-click/tap "Add place" menu item). newPlaceCategory is free
+      // text, not restricted to `names` above - typing e.g. "Home" both
+      // saves the place under that category and adds it to `names` so it
+      // becomes a real, selectable search category afterwards.
+      addPlaceDialogOpen: false,
       newPlaceName: '',
-      // NOTE: inferred field for the "add a new place" flow
-      // (createPlace / addPlace in Map.jsx); not reverse-engineered in full
-      // this session.
-      newPlaceSelectedTypes: [],
+      newPlaceCategory: '',
       newPlaceLocation: null,
     };
 
@@ -117,6 +122,9 @@ export default class HomePage extends React.Component {
     this.recenterToCurrentLocation = this.recenterToCurrentLocation.bind(this);
     this.setPosition = this.setPosition.bind(this);
     this.retrievePlaces = this.retrievePlaces.bind(this);
+    this.openAddPlaceForm = this.openAddPlaceForm.bind(this);
+    this.closeAddPlaceForm = this.closeAddPlaceForm.bind(this);
+    this.submitNewPlace = this.submitNewPlace.bind(this);
     this.handleAddressKeyDown = this.handleAddressKeyDown.bind(this);
     this.handleUpdateAddressValue = this.handleUpdateAddressValue.bind(this);
   }
@@ -252,25 +260,74 @@ export default class HomePage extends React.Component {
     this.setCurrentUser(null);
   }
 
-  showOverlay(show, voteText = '', place = null, isNewPlaceForm = false, newPlaceLocation = null) {
-    if (isNewPlaceForm) {
-      this.setState({
-        ...this.state,
-        loaderVisible: show,
-        loaderVoteText: '',
-        newPlaceName: '',
-        newPlaceSelectedTypes: [],
-        newPlaceLocation,
-      });
-    } else {
-      this.setState({
-        ...this.state,
-        loaderVisible: show,
-        loaderVoteText: voteText,
-        loaderPlace: place,
-        newPlaceLocation,
-      });
+  showOverlay(show, voteText = '', place = null) {
+    this.setState({
+      ...this.state,
+      loaderVisible: show,
+      loaderVoteText: voteText,
+      loaderPlace: place,
+    });
+  }
+
+  // Opens the "Add a new place" dialog - triggered from Map.jsx's addPlace()
+  // (the "Add place" item on the map's click popup menu, both in the 2D/
+  // tilted view and - via the camera-center approximation there - the
+  // Photorealistic 3D view).
+  openAddPlaceForm(location) {
+    this.setState({
+      ...this.state,
+      addPlaceDialogOpen: true,
+      newPlaceName: '',
+      newPlaceCategory: '',
+      newPlaceLocation: location,
+    });
+  }
+
+  closeAddPlaceForm() {
+    this.setState({ ...this.state, addPlaceDialogOpen: false });
+  }
+
+  submitNewPlace() {
+    const { newPlaceName, newPlaceCategory, newPlaceLocation } = this.state;
+    const name = newPlaceName.trim();
+    const category = newPlaceCategory.trim();
+    if (!name || !category || !newPlaceLocation) {
+      return;
     }
+
+    // newPlaceLocation is a real google.maps.LatLng (lat()/lng() methods)
+    // when it came from a 2D/tilted map click, or a plain {lat, lng} object
+    // when it came from the Photorealistic 3D view's camera-center
+    // approximation (see Map.jsx's onMap3dClick) - handle both.
+    const lat = typeof newPlaceLocation.lat === 'function' ? newPlaceLocation.lat() : newPlaceLocation.lat;
+    const lng = typeof newPlaceLocation.lng === 'function' ? newPlaceLocation.lng() : newPlaceLocation.lng;
+
+    // Custom categories aren't restricted to the Google place types list -
+    // "Home" becomes types: ['home'], same shape nearbySearch already
+    // expects for Google-sourced types, just user-defined instead.
+    const typeKey = category.toLowerCase().replace(/\s+/g, '_');
+    const place = {
+      place_id: `custom-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+      name,
+      types: [typeKey],
+      geometry: {
+        location: { lat, lng },
+      },
+    };
+
+    this.apiService.createPlace(place).then(() => {
+      this.setState((prevState) => ({
+        ...prevState,
+        addPlaceDialogOpen: false,
+        // Make the custom category immediately searchable/selectable, same
+        // as any built-in one, and switch to it so the new place shows up
+        // on the map right away without an extra manual step.
+        names: prevState.names.includes(category) ? prevState.names : [...prevState.names, category],
+        selectedTypes: category,
+      }), () => {
+        this.retrievePlaces();
+      });
+    });
   }
 
   // Invoked from the raw HTML onclick inside a marker's hover tooltip
@@ -714,11 +771,44 @@ export default class HomePage extends React.Component {
       </div>
     );
 
+    const addPlaceDialogActions = [
+      <Button key="cancel" onClick={this.closeAddPlaceForm}>Cancel</Button>,
+      <Button key="save" onClick={this.submitNewPlace} theme="green">Save</Button>,
+    ];
+
+    const addPlaceDialog = (
+      <Dialog
+        title="Add a new place"
+        open={this.state.addPlaceDialogOpen}
+        onRequestClose={this.closeAddPlaceForm}
+        actions={addPlaceDialogActions}
+        autoScrollBodyContent
+      >
+        <TextField
+          floatingLabelText="Place name"
+          fullWidth
+          value={this.state.newPlaceName}
+          onChange={(evt) => this.setState({ ...this.state, newPlaceName: evt.target.value })}
+        />
+        <AutoComplete
+          floatingLabelText="Category - pick one or type your own (e.g. Home)"
+          fullWidth
+          openOnFocus
+          filter={AutoComplete.caseInsensitiveFilter}
+          dataSource={this.state.names}
+          searchText={this.state.newPlaceCategory}
+          onUpdateInput={(value) => this.setState({ ...this.state, newPlaceCategory: value })}
+          onNewRequest={(value) => this.setState({ ...this.state, newPlaceCategory: value })}
+        />
+      </Dialog>
+    );
+
     const result = (
       <Loader show={this.state.loaderVisible} message={loaderContent}>
         <div>
           {menu}
           {helpOverlay}
+          {addPlaceDialog}
           <Map
             ref={(elem) => { this.map = elem; }}
             height={this.state.height}
@@ -731,6 +821,7 @@ export default class HomePage extends React.Component {
             closeMenu={this.closeMenu}
             currentUser={this.state.currentUser}
             mapViewMode={this.state.mapViewMode}
+            openAddPlaceForm={this.openAddPlaceForm}
           />
         </div>
       </Loader>
