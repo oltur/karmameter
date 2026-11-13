@@ -16,7 +16,7 @@ import imageMyLocation from '../../../images/my-location.png';
 // "3D Buildings" view still tilts the camera (setTilt(45)) but won't show
 // extruded building geometry, since that requires the vector renderer a
 // Map ID turns on.
-const MAP_ID = '';
+const MAP_ID = '31cb9021a132e7b13954ff29';
 
 // NOTE: this component no longer queries google.maps.places.PlacesService
 // client-side. Place data (already enriched with our own ratings) is fetched
@@ -75,6 +75,17 @@ export default class Map extends React.Component {
     try {
       if (this.props.position !== nextProps.position) {
         this.setMapPosition(nextProps.position);
+        // Only re-centers the 3D camera - never touches tilt/range, so
+        // "go to current location" pans there without resetting whatever
+        // angle/zoom the user had set (see the gmp-map-3d ref callback in
+        // render() for why tilt/range/center aren't reactive JSX props).
+        if (this.map3dElem) {
+          const lat = Map.readCoord(nextProps.position || {}, 'lat', null);
+          const lng = Map.readCoord(nextProps.position || {}, 'lng', null);
+          if (lat !== null && lng !== null) {
+            this.map3dElem.center = { lat, lng, altitude: 200 };
+          }
+        }
       }
       if (this.props.distance !== nextProps.distance && this.radiusCircle) {
         this.radiusCircle.setRadius(nextProps.distance);
@@ -178,20 +189,27 @@ export default class Map extends React.Component {
     }
     const { Marker3DInteractiveElement } = google.maps.maps3d;
     const marker = new Marker3DInteractiveElement({
+      // altitudeMode defaults to CLAMP_TO_GROUND, which ignores altitude -
+      // no need to set one.
       position: {
         lat: place.geometry.location.lat,
         lng: place.geometry.location.lng,
-        altitude: 0,
       },
     });
 
-    // Same rating-colored SVG badge as the 2D markers (getScaleImage), set
-    // as the marker's glyph instead of a google.maps.Marker icon.
+    // Marker3DElement has no `glyph` property (that's AdvancedMarkerElement's
+    // API, a different class) - a custom visual has to go through this
+    // element's default slot instead: an <img>/<svg> wrapped in a <template>
+    // child. Setting `.glyph` directly (as in an earlier version of this
+    // code) was a silent no-op - the library ignores unknown properties, so
+    // markers rendered with no visible content at all.
+    const template = document.createElement('template');
     const glyphImg = document.createElement('img');
     glyphImg.src = this.getScaleImage(place.average_rating);
-    glyphImg.style.width = '28px';
-    glyphImg.style.height = '28px';
-    marker.glyph = glyphImg;
+    glyphImg.width = 28;
+    glyphImg.height = 28;
+    template.content.appendChild(glyphImg);
+    marker.appendChild(template);
 
     const typeText = Helpers.decodeGoogleLocationName(place.types[0]);
     marker.title = `${place.name} (${typeText})`;
@@ -530,19 +548,25 @@ export default class Map extends React.Component {
         <gmp-map-3d
           ref={(elem) => {
             this.map3dElem = elem;
-            // Plain native DOM listener, not a React onClick - gmp-map-3d is
-            // an unmanaged custom element - and guarded so the ref callback
-            // (which React can invoke more than once) only binds it once.
-            if (elem && !elem.dataset.karmaClickBound) {
-              elem.dataset.karmaClickBound = 'true';
+            // Everything here runs exactly once (guarded), not on every
+            // render - center/tilt/range/mode are properties the library
+            // actively keeps synced to whatever's set, so passing them as
+            // reactive JSX props re-applied the same initial framing on
+            // every re-render (e.g. the radius slider triggering a
+            // places refetch), snapping back any pan/tilt/zoom the user
+            // had done. Set once here instead; componentWillReceiveProps
+            // re-centers (only) when position changes, e.g. via "go to
+            // current location".
+            if (elem && !elem.dataset.karmaInitDone) {
+              elem.dataset.karmaInitDone = 'true';
+              elem.center = { lat, lng, altitude: 200 };
+              elem.tilt = 65;
+              elem.range = 1200;
+              elem.mode = 'hybrid';
               elem.addEventListener('click', (event) => this.onMap3dClick(event));
             }
           }}
           className="map"
-          center={`${lat},${lng},200`}
-          tilt="65"
-          range="1200"
-          mode="hybrid"
           style={
             {
               height: this.props.height,
