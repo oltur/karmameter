@@ -825,7 +825,18 @@ export default class HomePage extends React.Component {
 
     const mainMenu = (
       <Paper className="main-menu-paper">
-        <Menu className="main-menu">
+        {/* disableAutoFocus is REQUIRED here, not cosmetic. Without it,
+            Menu.componentWillReceiveProps resets focusIndex to 0 on every
+            prop change; Menu then marks child 0 as focusState="focused",
+            and MenuItem.componentDidUpdate -> applyFocusState() calls
+            buttonEl.focus() on it. Since every keystroke in the address
+            field re-renders HomePage (and so re-renders this Menu), the
+            first menu item stole focus back after every single character.
+            disableAutoFocus pins focusIndex to -1, so no child is ever
+            marked focused and nothing grabs focus. This menu is a settings
+            panel containing real inputs, not a dropdown list, so it should
+            never have been auto-focusing its first row anyway. */}
+        <Menu className="main-menu" disableAutoFocus>
           {myProfilePlaceholder}
           {loginPlaceholder}
           {logoutPlaceholder}
