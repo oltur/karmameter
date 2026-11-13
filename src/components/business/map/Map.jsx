@@ -71,37 +71,44 @@ export default class Map extends React.Component {
     this.handleRequestClose = this.handleRequestClose.bind(this);
   }
 
-  // componentWillReceiveProps is wrapped defensively: in production this has
-  // run before this.googleMap / this.radiusCircle exist yet (e.g. a stray
-  // re-render before initialize() has finished), so a bare property access
-  // must not take down the whole render.
-  componentWillReceiveProps(nextProps) {
+  // Everything here is an imperative call into the Google Maps objects,
+  // which live outside React's tree - so this belongs after the commit, not
+  // in the deprecated componentWillReceiveProps it used to sit in (React
+  // warns about that lifecycle and drops the un-prefixed name in React 18).
+  // Running post-commit is also marginally more correct: the DOM the map
+  // measures itself against has settled by then.
+  //
+  // Still wrapped defensively: in production this has run before
+  // this.googleMap / this.radiusCircle exist yet (e.g. a stray re-render
+  // before initialize() has finished), so a bare property access must not
+  // take down the whole render.
+  componentDidUpdate(prevProps) {
     try {
-      if (this.props.position !== nextProps.position) {
-        this.setMapPosition(nextProps.position);
+      if (prevProps.position !== this.props.position) {
+        this.setMapPosition(this.props.position);
         // Only re-centers the 3D camera - never touches tilt/range, so
         // "go to current location" pans there without resetting whatever
         // angle/zoom the user had set (see the gmp-map-3d ref callback in
         // render() for why tilt/range/center aren't reactive JSX props).
         if (this.map3dElem) {
-          const lat = Map.readCoord(nextProps.position || {}, 'lat', null);
-          const lng = Map.readCoord(nextProps.position || {}, 'lng', null);
+          const lat = Map.readCoord(this.props.position || {}, 'lat', null);
+          const lng = Map.readCoord(this.props.position || {}, 'lng', null);
           if (lat !== null && lng !== null) {
             this.map3dElem.center = { lat, lng, altitude: 200 };
           }
         }
       }
-      if (this.props.distance !== nextProps.distance && this.radiusCircle) {
-        this.radiusCircle.setRadius(nextProps.distance);
+      if (prevProps.distance !== this.props.distance && this.radiusCircle) {
+        this.radiusCircle.setRadius(this.props.distance);
       }
       // Street View is a separately-billed Maps Platform SKU with zero
       // friction for an anonymous visitor to trigger (just drag the Pegman)
       // - gate it behind sign-in rather than removing it outright.
-      if (this.props.currentUser !== nextProps.currentUser && this.googleMap) {
-        this.googleMap.setOptions({ streetViewControl: !!nextProps.currentUser });
+      if (prevProps.currentUser !== this.props.currentUser && this.googleMap) {
+        this.googleMap.setOptions({ streetViewControl: !!this.props.currentUser });
       }
-      if (this.props.mapViewMode !== nextProps.mapViewMode) {
-        this.applyViewMode(nextProps.mapViewMode);
+      if (prevProps.mapViewMode !== this.props.mapViewMode) {
+        this.applyViewMode(this.props.mapViewMode);
       }
     } catch (e) {
       // see note above
@@ -345,7 +352,7 @@ export default class Map extends React.Component {
       center: this.getPosition(),
       zoom: 15,
       mapTypeControl: true,
-      // Anonymous by default (see componentWillReceiveProps for the toggle
+      // Anonymous by default (see componentDidUpdate for the toggle
       // on sign-in/sign-out) - Street View panorama loads are a separately
       // billed SKU with no friction for a visitor to trigger.
       streetViewControl: !!this.props.currentUser,
@@ -441,10 +448,12 @@ export default class Map extends React.Component {
     if (this.radiusCircle) {
       this.radiusCircle.setCenter(position);
     }
-    this.setState({
-      ...this.state,
-      popUpMenuOpen: false,
-    });
+    // Functional updater that bails when the menu is already closed. This is
+    // now reached from componentDidUpdate, where an unconditional setState
+    // would schedule a second render pass on every recenter; returning the
+    // same state object lets React skip it. (It cannot loop either way - the
+    // caller is guarded on a prop change, and this touches only state.)
+    this.setState((prevState) => (prevState.popUpMenuOpen ? { ...prevState, popUpMenuOpen: false } : prevState));
   }
 
   initialize() {
@@ -593,7 +602,7 @@ export default class Map extends React.Component {
             // reactive JSX props re-applied the same initial framing on
             // every re-render (e.g. the radius slider triggering a
             // places refetch), snapping back any pan/tilt/zoom the user
-            // had done. Set once here instead; componentWillReceiveProps
+            // had done. Set once here instead; componentDidUpdate
             // re-centers (only) when position changes, e.g. via "go to
             // current location".
             if (elem && !elem.dataset.karmaInitDone) {
