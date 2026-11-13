@@ -40,14 +40,18 @@ const GOOGLE_OAUTH_CLIENT_ID = '1048915032471-9q645get1onsk8lt5l847tceisqu7aq3.a
 // restricted to this domain in Google Cloud Console, same as it ships today.
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBjBVO0J-a0PT30d-9lieKa9ygFnN8J1GA';
 
-// Language for Google Maps labels, place names and its own UI controls
-// ("Map"/"Satellite", the Street View prompts, etc). Without this the Maps
-// API follows the BROWSER's language, so the map rendered in Ukrainian or
-// Russian for anyone whose Chrome is set that way while the rest of the app
-// stayed English. Pinning it keeps the whole UI consistent.
-// Any Maps-supported code works here ('uk', 'ru', 'de', 'he'...):
+// Language choices offered in the menu, for Google Maps' labels, place names
+// and its own controls ("Map"/"Satellite" etc). 'default' deliberately sends
+// no `language` parameter at all, which is what makes Maps fall back to the
+// visitor's own browser language.
+// Other Maps-supported codes can be added here - see
 // https://developers.google.com/maps/faq#languagesupport
-const GOOGLE_MAPS_LANGUAGE = 'en';
+const MAP_LANGUAGES = [
+  { value: 'default', label: 'Default (browser language)' },
+  { value: 'en', label: 'English' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'uk', label: 'Українська' },
+];
 
 // Only these Google accounts may actually sign in - anyone else's token is
 // fetched successfully (OAuth itself succeeds) but rejected client-side
@@ -68,6 +72,45 @@ const GEOLOCATION_OPTIONS = { timeout: 10000, maximumAge: 60000 };
 // entire places array and is never read back.
 const POSITION_STORAGE_PREFIX = 'map';
 const POSITION_STORAGE_KEY = 'lastPosition';
+const LANGUAGE_STORAGE_KEY = 'language';
+const SEARCH_STORAGE_KEY = 'search';
+
+const MIN_DISTANCE = 100;
+const MAX_DISTANCE = 50000;
+
+// The Google place types offered in the category dropdown. Custom categories
+// typed into the Add Place dialog (e.g. "Home") are appended to a copy of
+// this at runtime - see the constructor and submitNewPlace.
+const DEFAULT_CATEGORY_NAMES = [
+  'Accounting', 'Airport', 'Amusement Park', 'Aquarium', 'Art Gallery', 'Atm', 'Bakery', 'Bank', 'Bar', 'Beauty Salon', 'Bicycle Store', 'Book Store', 'Bowling Alley', 'Bus Station', 'Cafe', 'Campground', 'Car Dealer', 'Car Rental', 'Car Repair', 'Car Wash', 'Casino', 'Cemetery', 'Church', 'City Hall', 'Clothing Store', 'Convenience Store', 'Courthouse', 'Dentist', 'Department Store', 'Doctor', 'Electrician', 'Electronics Store', 'Embassy', 'Fire Station', 'Florist', 'Funeral Home', 'Furniture Store', 'Gas Station', 'Gym', 'Hair Care', 'Hardware Store', 'Hindu Temple', 'Home Goods Store', 'Hospital', 'Insurance Agency', 'Jewelry Store', 'Laundry', 'Lawyer', 'Library', 'Liquor Store', 'Local Government Office', 'Locksmith', 'Lodging', 'Meal Delivery', 'Meal Takeaway', 'Mosque', 'Movie Rental', 'Movie Theater', 'Moving Company', 'Museum', 'Night Club', 'Painter', 'Park', 'Parking', 'Pet Store', 'Pharmacy', 'Physiotherapist', 'Plumber', 'Police', 'Post Office', 'Real Estate Agency', 'Restaurant', 'Roofing Contractor', 'Rv Park', 'School', 'Shoe Store', 'Shopping Mall', 'Spa', 'Stadium', 'Storage', 'Store', 'Subway Station', 'Synagogue', 'Taxi Stand', 'Train Station', 'Transit Station', 'Travel Agency', 'University', 'Veterinary Care', 'Zoo',
+];
+
+// Reads are validated against what the app actually accepts rather than
+// trusted: these entries are user-editable (devtools, a stale build, a
+// hand-edited profile), and a bad value would otherwise reach the Maps API
+// or the SelectField as-is.
+function readStoredLanguage(storageService) {
+  try {
+    const value = storageService.getData(POSITION_STORAGE_PREFIX, LANGUAGE_STORAGE_KEY);
+    return MAP_LANGUAGES.some((lang) => lang.value === value) ? value : 'default';
+  } catch (e) {
+    return 'default';
+  }
+}
+
+function readStoredSearch(storageService) {
+  try {
+    const saved = storageService.getData(POSITION_STORAGE_PREFIX, SEARCH_STORAGE_KEY) || {};
+    const distance = (typeof saved.distance === 'number' &&
+      saved.distance >= MIN_DISTANCE && saved.distance <= MAX_DISTANCE)
+      ? saved.distance : null;
+    const selectedTypes = (typeof saved.selectedTypes === 'string' && saved.selectedTypes)
+      ? saved.selectedTypes : null;
+    return { distance, selectedTypes };
+  } catch (e) {
+    return { distance: null, selectedTypes: null };
+  }
+}
 
 export default class HomePage extends React.Component {
   constructor() {
@@ -79,6 +122,22 @@ export default class HomePage extends React.Component {
     this.geocoderService = null;
     this.tokenClient = null;
 
+    // Restored here rather than in componentDidMount so the very first
+    // render and the first retrievePlaces() already use them - otherwise
+    // changing the map language (which reloads the page) would visibly
+    // reset the category and radius on every switch.
+    const savedSearch = readStoredSearch(this.storageService);
+    this.mapLanguage = readStoredLanguage(this.storageService);
+
+    // A restored category may be a custom one typed into Add Place ("Home"),
+    // which isn't in the built-in list - append it, or the SelectField would
+    // have a value matching none of its options and render blank.
+    const selectedTypes = savedSearch.selectedTypes || 'Restaurant';
+    const names = DEFAULT_CATEGORY_NAMES.slice();
+    if (!names.includes(selectedTypes)) {
+      names.push(selectedTypes);
+    }
+
     this.state = {
       isLoaded: false,
       width: 0,
@@ -87,7 +146,11 @@ export default class HomePage extends React.Component {
       loaderVoteText: '',
       loaderPlace: null,
       helpVisible: false,
-      distance: 1000,
+      distance: savedSearch.distance || 1000,
+      // Mirrors this.mapLanguage so the SelectField has something to bind to;
+      // the authoritative copy is the instance field, read before the Maps
+      // script URL is built in componentDidMount.
+      mapLanguage: this.mapLanguage,
       // Confirmed: not read from storageService - every page load starts
       // signed out, regardless of a previous session.
       currentUser: null,
@@ -98,13 +161,11 @@ export default class HomePage extends React.Component {
       // (separately billed Photorealistic 3D Tiles, needs the Map Tiles API
       // enabled in Cloud Console).
       mapViewMode: 'flat',
-      names: [
-        'Accounting', 'Airport', 'Amusement Park', 'Aquarium', 'Art Gallery', 'Atm', 'Bakery', 'Bank', 'Bar', 'Beauty Salon', 'Bicycle Store', 'Book Store', 'Bowling Alley', 'Bus Station', 'Cafe', 'Campground', 'Car Dealer', 'Car Rental', 'Car Repair', 'Car Wash', 'Casino', 'Cemetery', 'Church', 'City Hall', 'Clothing Store', 'Convenience Store', 'Courthouse', 'Dentist', 'Department Store', 'Doctor', 'Electrician', 'Electronics Store', 'Embassy', 'Fire Station', 'Florist', 'Funeral Home', 'Furniture Store', 'Gas Station', 'Gym', 'Hair Care', 'Hardware Store', 'Hindu Temple', 'Home Goods Store', 'Hospital', 'Insurance Agency', 'Jewelry Store', 'Laundry', 'Lawyer', 'Library', 'Liquor Store', 'Local Government Office', 'Locksmith', 'Lodging', 'Meal Delivery', 'Meal Takeaway', 'Mosque', 'Movie Rental', 'Movie Theater', 'Moving Company', 'Museum', 'Night Club', 'Painter', 'Park', 'Parking', 'Pet Store', 'Pharmacy', 'Physiotherapist', 'Plumber', 'Police', 'Post Office', 'Real Estate Agency', 'Restaurant', 'Roofing Contractor', 'Rv Park', 'School', 'Shoe Store', 'Shopping Mall', 'Spa', 'Stadium', 'Storage', 'Store', 'Subway Station', 'Synagogue', 'Taxi Stand', 'Train Station', 'Transit Station', 'Travel Agency', 'University', 'Veterinary Care', 'Zoo',
-      ],
+      names,
       // NOTE: production reads `this.state.selectedTypes.toLowerCase()` (a
       // single string, not the 2018 multi-select array) when calling
       // getNearbyPlaces - the menu is a single SelectField, not multi-select.
-      selectedTypes: 'Restaurant',
+      selectedTypes,
       places: [],
       placesVersion: 0,
       position: null,
@@ -155,7 +216,10 @@ export default class HomePage extends React.Component {
     // bills when that view actually renders tiles.
     // loading=async is Google's recommended loading pattern (the API logs a
     // performance warning without it); the callback still fires as before.
-    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d,marker&v=beta&loading=async&language=${GOOGLE_MAPS_LANGUAGE}&callback=HomePage.initMap`);
+    // 'default' omits the parameter entirely, which is what makes Maps fall
+    // back to the visitor's browser language.
+    const languageParam = this.mapLanguage === 'default' ? '' : `&language=${this.mapLanguage}`;
+    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d,marker&v=beta&loading=async${languageParam}&callback=HomePage.initMap`);
     window.addEventListener('resize', this.updateWindowDimensions);
     document.addEventListener('keydown', this.keyDownHandler, false);
     this.loadGoogleIdentityServices();
@@ -178,6 +242,14 @@ export default class HomePage extends React.Component {
     // search, which bypasses setPosition entirely.
     if (this.state.position !== prevState.position) {
       this.savePosition(this.state.position);
+    }
+    // Persisted so the page reload that applies a map-language change (see
+    // handleMapLanguageChange) doesn't throw away the current search.
+    if (
+      this.state.distance !== prevState.distance ||
+      this.state.selectedTypes !== prevState.selectedTypes
+    ) {
+      this.saveSearchSettings();
     }
     if (
       this.state.distance !== prevState.distance ||
@@ -419,6 +491,37 @@ export default class HomePage extends React.Component {
       // - fall through to geolocation as if there were nothing saved.
       return false;
     }
+  }
+
+  saveSearchSettings() {
+    try {
+      this.storageService.setData(POSITION_STORAGE_PREFIX, SEARCH_STORAGE_KEY, {
+        distance: this.state.distance,
+        selectedTypes: this.state.selectedTypes,
+      });
+    } catch (e) {
+      // localStorage can throw (Safari private mode, quota) - never let
+      // persistence failure break the map itself.
+    }
+  }
+
+  // Google Maps bakes `language` in when its script loads and offers no
+  // runtime setter for the 2D map; it also refuses to load twice on one
+  // page. So applying a new choice means reloading - which is seamless
+  // because position and search settings are both persisted.
+  handleMapLanguageChange = (event, index, mapLanguage) => {
+    if (mapLanguage === this.state.mapLanguage) {
+      return;
+    }
+    try {
+      this.storageService.setData(POSITION_STORAGE_PREFIX, LANGUAGE_STORAGE_KEY, mapLanguage);
+    } catch (e) {
+      // Can't persist it, so a reload would silently revert - tell the user
+      // instead of appearing to do nothing.
+      alert('Could not save the language setting (browser storage is unavailable).');
+      return;
+    }
+    window.location.reload();
   }
 
   savePosition(position) {
@@ -689,6 +792,19 @@ export default class HomePage extends React.Component {
       </SelectField>
     );
 
+    const mapLanguageSelector = (
+      <SelectField
+        className="map-language"
+        floatingLabelText="Map language"
+        value={this.state.mapLanguage}
+        onChange={this.handleMapLanguageChange}
+      >
+        {MAP_LANGUAGES.map((lang) => (
+          <MenuItem key={lang.value} value={lang.value} primaryText={lang.label} />
+        ))}
+      </SelectField>
+    );
+
     // Replaced the generic Material "dehaze" hamburger glyph with the app's
     // own logo mark (a bold blue-circle "K", same as the favicon - the old
     // tiny "KARMA" wordmark was illegible at real favicon sizes). The
@@ -715,6 +831,7 @@ export default class HomePage extends React.Component {
           {logoutPlaceholder}
           {placesCategory}
           {mapViewSelector}
+          {mapLanguageSelector}
           <MenuItem primaryText={sliderDistance} />
           {menuGeocoder}
           <MenuItem primaryText="Help &amp; feedback" onClick={this.openHelp} />
