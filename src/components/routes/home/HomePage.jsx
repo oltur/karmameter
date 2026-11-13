@@ -136,7 +136,9 @@ export default class HomePage extends React.Component {
     // 3D Tiles element (<gmp-map-3d>) available at all - harmless to load
     // even when the "Photorealistic 3D" view is never selected, it only
     // bills when that view actually renders tiles.
-    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d&v=beta&callback=HomePage.initMap`);
+    // loading=async is Google's recommended loading pattern (the API logs a
+    // performance warning without it); the callback still fires as before.
+    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d&v=beta&loading=async&callback=HomePage.initMap`);
     window.addEventListener('resize', this.updateWindowDimensions);
     document.addEventListener('keydown', this.keyDownHandler, false);
     this.loadGoogleIdentityServices();
