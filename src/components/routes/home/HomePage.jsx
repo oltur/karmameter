@@ -74,6 +74,11 @@ export default class HomePage extends React.Component {
       currentUser: null,
       menuVisible: false,
       inputValueAddress: '',
+      // 'flat' (default, no extra cost) - 'tilted' (free 3D-buildings tilt,
+      // needs a vector Map ID - see MAP_ID in Map.jsx) - 'photorealistic'
+      // (separately billed Photorealistic 3D Tiles, needs the Map Tiles API
+      // enabled in Cloud Console).
+      mapViewMode: 'flat',
       names: [
         'Accounting', 'Airport', 'Amusement Park', 'Aquarium', 'Art Gallery', 'Atm', 'Bakery', 'Bank', 'Bar', 'Beauty Salon', 'Bicycle Store', 'Book Store', 'Bowling Alley', 'Bus Station', 'Cafe', 'Campground', 'Car Dealer', 'Car Rental', 'Car Repair', 'Car Wash', 'Casino', 'Cemetery', 'Church', 'City Hall', 'Clothing Store', 'Convenience Store', 'Courthouse', 'Dentist', 'Department Store', 'Doctor', 'Electrician', 'Electronics Store', 'Embassy', 'Fire Station', 'Florist', 'Funeral Home', 'Furniture Store', 'Gas Station', 'Gym', 'Hair Care', 'Hardware Store', 'Hindu Temple', 'Home Goods Store', 'Hospital', 'Insurance Agency', 'Jewelry Store', 'Laundry', 'Lawyer', 'Library', 'Liquor Store', 'Local Government Office', 'Locksmith', 'Lodging', 'Meal Delivery', 'Meal Takeaway', 'Mosque', 'Movie Rental', 'Movie Theater', 'Moving Company', 'Museum', 'Night Club', 'Painter', 'Park', 'Parking', 'Pet Store', 'Pharmacy', 'Physiotherapist', 'Plumber', 'Police', 'Post Office', 'Real Estate Agency', 'Restaurant', 'Roofing Contractor', 'Rv Park', 'School', 'Shoe Store', 'Shopping Mall', 'Spa', 'Stadium', 'Storage', 'Store', 'Subway Station', 'Synagogue', 'Taxi Stand', 'Train Station', 'Transit Station', 'Travel Agency', 'University', 'Veterinary Care', 'Zoo',
       ],
@@ -119,7 +124,11 @@ export default class HomePage extends React.Component {
   componentDidMount() {
     this.updateWindowDimensions();
     window.HomePage = this;
-    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&callback=HomePage.initMap`);
+    // v=beta + the maps3d library are required to make the Photorealistic
+    // 3D Tiles element (<gmp-map-3d>) available at all - harmless to load
+    // even when the "Photorealistic 3D" view is never selected, it only
+    // bills when that view actually renders tiles.
+    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d&v=beta&callback=HomePage.initMap`);
     window.addEventListener('resize', this.updateWindowDimensions);
     document.addEventListener('keydown', this.keyDownHandler, false);
     this.loadGoogleIdentityServices();
@@ -393,6 +402,13 @@ export default class HomePage extends React.Component {
     this.closeMenu();
   }
 
+  handleMapViewModeChange = (event, index, mapViewMode) => {
+    // Functional updater - see the comment on closeMenu() for why a plain
+    // {...this.state} snapshot here would risk stomping another setState
+    // queued in the same batch.
+    this.setState(prevState => ({ ...prevState, mapViewMode }));
+  }
+
   handleUpdateAddressValue(evt) {
     this.setState({
       ...this.state,
@@ -527,6 +543,24 @@ export default class HomePage extends React.Component {
       </SelectField>
     );
 
+    // Lets you compare the two 3D options side by side: the free vector-tilt
+    // "3D Buildings" view (needs a Map ID - see MAP_ID in Map.jsx, otherwise
+    // it just tilts the camera over whatever imagery is loaded) versus the
+    // separately-billed Photorealistic 3D Tiles view (needs the Map Tiles
+    // API enabled in Cloud Console - see Map.jsx for details).
+    const mapViewSelector = (
+      <SelectField
+        className="map-view-mode"
+        floatingLabelText="Map view (3D comparison)"
+        value={this.state.mapViewMode}
+        onChange={this.handleMapViewModeChange}
+      >
+        <MenuItem value="flat" primaryText="Standard (2D)" />
+        <MenuItem value="tilted" primaryText="3D Buildings (free)" />
+        <MenuItem value="photorealistic" primaryText="Photorealistic 3D (billed)" />
+      </SelectField>
+    );
+
     // Replaced the generic Material "dehaze" hamburger glyph with the app's
     // own logo mark (a bold blue-circle "K", same as the favicon - the old
     // tiny "KARMA" wordmark was illegible at real favicon sizes). The
@@ -552,6 +586,7 @@ export default class HomePage extends React.Component {
           {loginPlaceholder}
           {logoutPlaceholder}
           {placesCategory}
+          {mapViewSelector}
           <MenuItem primaryText={sliderDistance} />
           {menuGeocoder}
           <MenuItem primaryText="Help &amp; feedback" onClick={this.openHelp} />
@@ -695,6 +730,7 @@ export default class HomePage extends React.Component {
             showOverlay={this.showOverlay}
             closeMenu={this.closeMenu}
             currentUser={this.state.currentUser}
+            mapViewMode={this.state.mapViewMode}
           />
         </div>
       </Loader>

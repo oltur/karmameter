@@ -9,6 +9,15 @@ import Helpers from '../../../tools/helpers';
 
 import imageMyLocation from '../../../images/my-location.png';
 
+// Optional vector Map ID for the free "3D Buildings" tilt view. Create one
+// at console.cloud.google.com -> Google Maps Platform -> Map Management ->
+// Create Map ID (map type "JavaScript", renderer "Vector") and paste it
+// here - it costs nothing extra versus a normal map load. Left blank, the
+// "3D Buildings" view still tilts the camera (setTilt(45)) but won't show
+// extruded building geometry, since that requires the vector renderer a
+// Map ID turns on.
+const MAP_ID = '';
+
 // NOTE: this component no longer queries google.maps.places.PlacesService
 // client-side. Place data (already enriched with our own ratings) is fetched
 // by HomePage via ApiService and handed down as the `places` prop; this
@@ -25,6 +34,7 @@ export default class Map extends React.Component {
     showOverlay: PropTypes.func,
     closeMenu: PropTypes.func,
     currentUser: PropTypes.object,
+    mapViewMode: PropTypes.oneOf(['flat', 'tilted', 'photorealistic']),
   }
 
   constructor(props) {
@@ -39,11 +49,17 @@ export default class Map extends React.Component {
     this.markersArray = [];
 
     this.menuAnchor = null;
+    this.map3dElem = null;
+    // undefined until importLibrary('maps3d') resolves/rejects the first
+    // time the "Photorealistic 3D" view is selected - avoids loading that
+    // (separately billed) library's tiles before it's actually asked for.
+    this.map3dLoadPromise = null;
     this.state = {
       popUpMenuOpen: false,
       popUpMenuLeft: 0,
       popUpMenuTop: 0,
       lastClickLocation: null,
+      map3dError: null,
     };
 
     this.handleRequestClose = this.handleRequestClose.bind(this);
@@ -67,8 +83,60 @@ export default class Map extends React.Component {
       if (this.props.currentUser !== nextProps.currentUser && this.googleMap) {
         this.googleMap.setOptions({ streetViewControl: !!nextProps.currentUser });
       }
+      if (this.props.mapViewMode !== nextProps.mapViewMode) {
+        this.applyViewMode(nextProps.mapViewMode);
+      }
     } catch (e) {
       // see note above
+    }
+  }
+
+  // Switches between the three comparison views. 'flat'/'tilted' both use
+  // the regular 2D google.maps.Map (just a tilt difference); 'photorealistic'
+  // swaps to the separate <gmp-map-3d> element instead, lazily loading the
+  // maps3d library the first time it's selected.
+  applyViewMode(mode) {
+    if (mode === 'photorealistic') {
+      this.showPhotorealistic3D();
+      return;
+    }
+    this.hidePhotorealistic3D();
+    if (this.googleMap) {
+      this.googleMap.setTilt(mode === 'tilted' ? 45 : 0);
+    }
+  }
+
+  showPhotorealistic3D() {
+    if (this.mapElem) {
+      this.mapElem.style.display = 'none';
+    }
+    if (this.map3dElem) {
+      this.map3dElem.style.display = 'block';
+    }
+    if (!this.map3dLoadPromise) {
+      this.map3dLoadPromise = google.maps.importLibrary('maps3d')
+        .then(() => {
+          this.setState({ ...this.state, map3dError: null });
+        })
+        .catch((err) => {
+          // Most likely cause: the Map Tiles API isn't enabled (or billing
+          // isn't set up) for this project in Cloud Console - that's a
+          // separate, billed product from the base Maps JavaScript API.
+          console.log('Photorealistic 3D Tiles failed to load:', err);
+          this.setState({
+            ...this.state,
+            map3dError: 'Photorealistic 3D Tiles unavailable - enable the "Map Tiles API" (and billing) for this project in Google Cloud Console.',
+          });
+        });
+    }
+  }
+
+  hidePhotorealistic3D() {
+    if (this.mapElem) {
+      this.mapElem.style.display = 'block';
+    }
+    if (this.map3dElem) {
+      this.map3dElem.style.display = 'none';
     }
   }
 
@@ -120,7 +188,7 @@ export default class Map extends React.Component {
   }
 
   setupMap() {
-    this.googleMap = new google.maps.Map(this.mapElem, {
+    const mapOptions = {
       center: this.getPosition(),
       zoom: 15,
       mapTypeControl: true,
@@ -132,7 +200,16 @@ export default class Map extends React.Component {
         style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
         position: google.maps.ControlPosition.LEFT_BOTTOM,
       },
-    });
+    };
+    // Only set when a vector Map ID has actually been created (see MAP_ID
+    // above) - an empty mapId is invalid, so this must stay conditional.
+    if (MAP_ID) {
+      mapOptions.mapId = MAP_ID;
+    }
+    this.googleMap = new google.maps.Map(this.mapElem, mapOptions);
+    if (this.props.mapViewMode === 'tilted') {
+      this.googleMap.setTilt(45);
+    }
 
     this.locationMarker = new google.maps.Marker({
       position: this.getPosition(),
@@ -218,6 +295,9 @@ export default class Map extends React.Component {
 
   initialize() {
     this.setupMap();
+    if (this.props.mapViewMode === 'photorealistic') {
+      this.showPhotorealistic3D();
+    }
   }
 
   fillMarkers(places = null) {
@@ -320,8 +400,16 @@ export default class Map extends React.Component {
       </Popover>
     );
 
+    // NOTE: deliberately not this.getPosition() here - that constructs a
+    // google.maps.LatLng, and `google` isn't defined yet on the very first
+    // render (the Maps JS script is still loading). Default matches
+    // getPosition()'s own fallback (31, 35).
+    const rawPosition = this.props.position;
+    const lat = rawPosition ? (typeof rawPosition.lat === 'function' ? rawPosition.lat() : rawPosition.lat) : 31;
+    const lng = rawPosition ? (typeof rawPosition.lng === 'function' ? rawPosition.lng() : rawPosition.lng) : 35;
+
     return (
-      <div>
+      <div style={{ position: 'relative' }}>
         <div
           ref={(elem) => { this.mapElem = elem; }}
           className="map"
@@ -331,6 +419,45 @@ export default class Map extends React.Component {
             }
           }
         />
+        {/* Photorealistic 3D Tiles - a separate element from google.maps.Map,
+            not just a mode switch on it. Hidden unless "photorealistic" is
+            selected (see showPhotorealistic3D/hidePhotorealistic3D above);
+            its geometry only loads (and only bills) once the maps3d library
+            has been imported and the element is visible. */}
+        <gmp-map-3d
+          ref={(elem) => { this.map3dElem = elem; }}
+          center={`${lat},${lng},200`}
+          tilt="65"
+          range="1200"
+          mode="hybrid"
+          style={
+            {
+              height: this.props.height,
+              display: 'none',
+            }
+          }
+        />
+        {this.state.map3dError && (
+          <div
+            style={
+              {
+                position: 'absolute',
+                top: 8,
+                left: 8,
+                right: 8,
+                padding: '8px 12px',
+                background: 'rgba(255,255,255,0.95)',
+                border: '1px solid #d03b3b',
+                borderRadius: 4,
+                color: '#d03b3b',
+                fontSize: 13,
+                zIndex: 10,
+              }
+            }
+          >
+            {this.state.map3dError}
+          </div>
+        )}
         <div
           ref={(elem) => { this.menuAnchor = elem; }}
           style={
