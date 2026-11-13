@@ -40,6 +40,15 @@ const GOOGLE_OAUTH_CLIENT_ID = '1048915032471-9q645get1onsk8lt5l847tceisqu7aq3.a
 // restricted to this domain in Google Cloud Console, same as it ships today.
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBjBVO0J-a0PT30d-9lieKa9ygFnN8J1GA';
 
+// Language for Google Maps labels, place names and its own UI controls
+// ("Map"/"Satellite", the Street View prompts, etc). Without this the Maps
+// API follows the BROWSER's language, so the map rendered in Ukrainian or
+// Russian for anyone whose Chrome is set that way while the rest of the app
+// stayed English. Pinning it keeps the whole UI consistent.
+// Any Maps-supported code works here ('uk', 'ru', 'de', 'he'...):
+// https://developers.google.com/maps/faq#languagesupport
+const GOOGLE_MAPS_LANGUAGE = 'en';
+
 // Only these Google accounts may actually sign in - anyone else's token is
 // fetched successfully (OAuth itself succeeds) but rejected client-side
 // before setCurrentUser ever runs.
@@ -146,7 +155,7 @@ export default class HomePage extends React.Component {
     // bills when that view actually renders tiles.
     // loading=async is Google's recommended loading pattern (the API logs a
     // performance warning without it); the callback still fires as before.
-    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d,marker&v=beta&loading=async&callback=HomePage.initMap`);
+    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d,marker&v=beta&loading=async&language=${GOOGLE_MAPS_LANGUAGE}&callback=HomePage.initMap`);
     window.addEventListener('resize', this.updateWindowDimensions);
     document.addEventListener('keydown', this.keyDownHandler, false);
     this.loadGoogleIdentityServices();
