@@ -52,6 +52,14 @@ const ALLOWED_EMAILS = ['olturua@gmail.com', 'banderhelen@gmail.com'];
 // forever instead of failing gracefully.
 const GEOLOCATION_OPTIONS = { timeout: 10000, maximumAge: 60000 };
 
+// Where the last map position is remembered between visits, so reopening the
+// page returns to wherever you left off instead of re-running geolocation.
+// Deliberately its own small {lat, lng} entry rather than reusing the
+// whole-state blob written in componentDidUpdate - that one carries the
+// entire places array and is never read back.
+const POSITION_STORAGE_PREFIX = 'map';
+const POSITION_STORAGE_KEY = 'lastPosition';
+
 export default class HomePage extends React.Component {
   constructor() {
     super();
@@ -156,6 +164,12 @@ export default class HomePage extends React.Component {
   // redundant but harmless, matching the live behavior exactly.
   componentDidUpdate(prevProps, prevState) {
     this.storageService.setData('state', 'current', this.state);
+    // Remember the map position for the next visit. Hooked here rather than
+    // in setPosition() because position is also set directly by the address
+    // search, which bypasses setPosition entirely.
+    if (this.state.position !== prevState.position) {
+      this.savePosition(this.state.position);
+    }
     if (
       this.state.distance !== prevState.distance ||
       this.state.position !== prevState.position ||
@@ -377,9 +391,56 @@ export default class HomePage extends React.Component {
     }
   }
 
+  // Restores the map to wherever it was left last time. Returns true when a
+  // saved position was found and applied, so the caller knows to skip the
+  // geolocation lookup (which would otherwise immediately override it - and
+  // would also re-prompt for location permission on every single visit).
+  restoreSavedPosition() {
+    try {
+      const saved = this.storageService.getData(POSITION_STORAGE_PREFIX, POSITION_STORAGE_KEY);
+      if (!saved || typeof saved.lat !== 'number' || typeof saved.lng !== 'number') {
+        return false;
+      }
+      // setPosition alone is enough - componentDidUpdate sees the changed
+      // position and runs retrievePlaces() itself.
+      this.setPosition(new google.maps.LatLng(saved.lat, saved.lng));
+      return true;
+    } catch (e) {
+      // Corrupt/unreadable entry (hand-edited, quota-cleared, private mode)
+      // - fall through to geolocation as if there were nothing saved.
+      return false;
+    }
+  }
+
+  savePosition(position) {
+    if (!position) {
+      return;
+    }
+    try {
+      const lat = typeof position.lat === 'function' ? position.lat() : position.lat;
+      const lng = typeof position.lng === 'function' ? position.lng() : position.lng;
+      if (typeof lat !== 'number' || typeof lng !== 'number') {
+        return;
+      }
+      this.storageService.setData(POSITION_STORAGE_PREFIX, POSITION_STORAGE_KEY, { lat, lng });
+    } catch (e) {
+      // localStorage can throw (Safari private mode, quota) - never let
+      // persistence failure break the map itself.
+    }
+  }
+
   initMap() {
     this.geocoderService = new google.maps.Geocoder();
     this.map.initialize();
+
+    // A remembered location wins over geolocation on startup - otherwise the
+    // lookup below would snap the map straight back to where you physically
+    // are, which is exactly what "remember where I left off" has to avoid.
+    // The map's "go to current location" button is still there on demand.
+    if (this.restoreSavedPosition()) {
+      return;
+    }
+
     this.locationProvider.getPosition(GEOLOCATION_OPTIONS)
       .then((position) => {
         this.setPosition(new google.maps.LatLng(position.coords.latitude, position.coords.longitude));
@@ -777,7 +838,13 @@ export default class HomePage extends React.Component {
       <Button key="save" onClick={this.submitNewPlace} theme="green">Save</Button>,
     ];
 
-    const addPlaceDialog = (
+    // Mounted ONLY while open, never kept in the tree closed. material-ui
+    // 0.x's Dialog hands its RenderToLayer a hardcoded `open: true`
+    // (Dialog.js:493) regardless of the Dialog's own open prop, so a mounted
+    // dialog keeps a <div> on document.body and re-renders its entire
+    // subtree through unstable_renderSubtreeIntoContainer on every parent
+    // render. That stole focus from the address field on every keystroke.
+    const addPlaceDialog = !this.state.addPlaceDialogOpen ? null : (
       <Dialog
         title="Add a new place"
         open={this.state.addPlaceDialogOpen}
