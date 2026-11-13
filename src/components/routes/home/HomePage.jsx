@@ -38,6 +38,11 @@ const GOOGLE_OAUTH_CLIENT_ID = '1048915032471-9q645get1onsk8lt5l847tceisqu7aq3.a
 // restricted to this domain in Google Cloud Console, same as it ships today.
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBjBVO0J-a0PT30d-9lieKa9ygFnN8J1GA';
 
+// Only these Google accounts may actually sign in - anyone else's token is
+// fetched successfully (OAuth itself succeeds) but rejected client-side
+// before setCurrentUser ever runs.
+const ALLOWED_EMAILS = ['olturua@gmail.com', 'banderhelen@gmail.com'];
+
 // Geolocation options shared by the initial-load and "go to current
 // location" lookups. No timeout was set here originally, which meant a
 // permission prompt that never got answered (slow user, or an automated/
@@ -187,6 +192,13 @@ export default class HomePage extends React.Component {
     })
       .then(r => r.json())
       .then((info) => {
+        if (!info.email || !ALLOWED_EMAILS.includes(info.email.toLowerCase())) {
+          alert('This Google account is not authorized to sign in to Karma Meter.');
+          if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+            window.google.accounts.oauth2.revoke(tokenResponse.access_token, () => {});
+          }
+          return;
+        }
         this.setCurrentUser({
           profileObj: {
             googleId: info.sub,
@@ -682,6 +694,7 @@ export default class HomePage extends React.Component {
             setPosition={this.setPosition}
             showOverlay={this.showOverlay}
             closeMenu={this.closeMenu}
+            currentUser={this.state.currentUser}
           />
         </div>
       </Loader>

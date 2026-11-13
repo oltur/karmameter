@@ -24,6 +24,7 @@ export default class Map extends React.Component {
     setPosition: PropTypes.func,
     showOverlay: PropTypes.func,
     closeMenu: PropTypes.func,
+    currentUser: PropTypes.object,
   }
 
   constructor(props) {
@@ -59,6 +60,12 @@ export default class Map extends React.Component {
       }
       if (this.props.distance !== nextProps.distance && this.radiusCircle) {
         this.radiusCircle.setRadius(nextProps.distance);
+      }
+      // Street View is a separately-billed Maps Platform SKU with zero
+      // friction for an anonymous visitor to trigger (just drag the Pegman)
+      // - gate it behind sign-in rather than removing it outright.
+      if (this.props.currentUser !== nextProps.currentUser && this.googleMap) {
+        this.googleMap.setOptions({ streetViewControl: !!nextProps.currentUser });
       }
     } catch (e) {
       // see note above
@@ -117,6 +124,10 @@ export default class Map extends React.Component {
       center: this.getPosition(),
       zoom: 15,
       mapTypeControl: true,
+      // Anonymous by default (see componentWillReceiveProps for the toggle
+      // on sign-in/sign-out) - Street View panorama loads are a separately
+      // billed SKU with no friction for a visitor to trigger.
+      streetViewControl: !!this.props.currentUser,
       mapTypeControlOptions: {
         style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
         position: google.maps.ControlPosition.LEFT_BOTTOM,
