@@ -138,7 +138,7 @@ export default class HomePage extends React.Component {
     // bills when that view actually renders tiles.
     // loading=async is Google's recommended loading pattern (the API logs a
     // performance warning without it); the callback still fires as before.
-    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d&v=beta&loading=async&callback=HomePage.initMap`);
+    loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d,marker&v=beta&loading=async&callback=HomePage.initMap`);
     window.addEventListener('resize', this.updateWindowDimensions);
     document.addEventListener('keydown', this.keyDownHandler, false);
     this.loadGoogleIdentityServices();

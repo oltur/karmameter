@@ -9,13 +9,13 @@ import Helpers from '../../../tools/helpers';
 
 import imageMyLocation from '../../../images/my-location.png';
 
-// Optional vector Map ID for the free "3D Buildings" tilt view. Create one
-// at console.cloud.google.com -> Google Maps Platform -> Map Management ->
-// Create Map ID (map type "JavaScript", renderer "Vector") and paste it
-// here - it costs nothing extra versus a normal map load. Left blank, the
-// "3D Buildings" view still tilts the camera (setTilt(45)) but won't show
-// extruded building geometry, since that requires the vector renderer a
-// Map ID turns on.
+// REQUIRED - not optional. AdvancedMarkerElement (used for every marker on
+// the 2D map) only renders on a map initialized with a Map ID, so blanking
+// this makes all markers silently disappear. It also enables the vector
+// renderer the "3D Buildings" tilt view needs to actually extrude buildings.
+// Created at console.cloud.google.com -> Google Maps Platform -> Map
+// Management -> Create Map ID (type "JavaScript", renderer "Vector"); it
+// costs nothing extra versus a normal map load.
 const MAP_ID = '31cb9021a132e7b13954ff29';
 
 // NOTE: this component no longer queries google.maps.places.PlacesService
@@ -164,9 +164,9 @@ export default class Map extends React.Component {
   }
 
   // Mirrors fillMarkers()/createMarker() for the Photorealistic 3D view -
-  // google.maps.Marker only attaches to a 2D google.maps.Map, so <gmp-map-3d>
-  // needs its own marker type (Marker3DInteractiveElement) from the same
-  // maps3d library, appended as real DOM children of the map element.
+  // AdvancedMarkerElement only attaches to a 2D google.maps.Map, so
+  // <gmp-map-3d> needs its own marker type (Marker3DInteractiveElement) from
+  // the maps3d library, appended as real DOM children of the map element.
   render3dMarkers(places) {
     if (!this.map3dElem || !(google.maps && google.maps.maps3d) || !places) {
       return;
@@ -312,6 +312,21 @@ export default class Map extends React.Component {
     return this.props.position || new google.maps.LatLng(31, 35);
   }
 
+  // AdvancedMarkerElement anchors the BOTTOM-CENTER of its content at the
+  // marker's position, whereas the google.maps.Marker this replaced centered
+  // its icon on the point (anchor: Point(size/2, size/2)). Nudging the image
+  // down by half its own height restores that - done with a plain CSS
+  // transform on our own element rather than the anchorTop/anchorLeft
+  // options, so the offset is unambiguous.
+  static buildMarkerImage(src, size) {
+    const img = document.createElement('img');
+    img.src = src;
+    img.width = size;
+    img.height = size;
+    img.style.transform = 'translateY(50%)';
+    return img;
+  }
+
   // A coordinate from google.maps.LatLng is a method (lat()) that needs its
   // `this` bound to the LatLng instance; one from a plain {lat, lng}
   // literal (e.g. a LatLngAltitude from the 3D view) is just a number - both
@@ -339,25 +354,24 @@ export default class Map extends React.Component {
         position: google.maps.ControlPosition.LEFT_BOTTOM,
       },
     };
-    // Only set when a vector Map ID has actually been created (see MAP_ID
-    // above) - an empty mapId is invalid, so this must stay conditional.
+    // Still guarded because an empty mapId is itself invalid, but MAP_ID is
+    // required now (see its comment above) - warn loudly rather than let
+    // every marker vanish with no explanation.
     if (MAP_ID) {
       mapOptions.mapId = MAP_ID;
+    } else {
+      console.log('MAP_ID is empty - AdvancedMarkerElement needs a Map ID, so no markers will render.');
     }
     this.googleMap = new google.maps.Map(this.mapElem, mapOptions);
     if (this.props.mapViewMode === 'tilted') {
       this.googleMap.setTilt(45);
     }
 
-    this.locationMarker = new google.maps.Marker({
+    this.locationMarker = new google.maps.marker.AdvancedMarkerElement({
       position: this.getPosition(),
       map: this.googleMap,
-      icon: {
-        url: imageMyLocation,
-        scaledSize: new google.maps.Size(32, 32),
-        anchor: new google.maps.Point(16, 16),
-      },
     });
+    this.locationMarker.appendChild(Map.buildMarkerImage(imageMyLocation, 32));
 
     // Light circle showing the currently selected search radius.
     this.radiusCircle = new google.maps.Circle({
@@ -421,7 +435,9 @@ export default class Map extends React.Component {
       position = this.getPosition();
     }
     this.googleMap.setCenter(position);
-    this.locationMarker.setPosition(position);
+    // AdvancedMarkerElement has no setPosition() - `position` is a settable
+    // property instead.
+    this.locationMarker.position = position;
     if (this.radiusCircle) {
       this.radiusCircle.setCenter(position);
     }
@@ -457,15 +473,15 @@ export default class Map extends React.Component {
       return;
     }
     const placeLoc = place.geometry.location;
-    const marker = new google.maps.Marker({
+    const marker = new google.maps.marker.AdvancedMarkerElement({
       map: this.googleMap,
       position: placeLoc,
-      icon: {
-        url: this.getScaleImage(place.average_rating),
-        scaledSize: new google.maps.Size(34, 34),
-        anchor: new google.maps.Point(17, 17),
-      },
+      // Required for gmp-click to fire at all - unlike google.maps.Marker,
+      // AdvancedMarkerElement is inert by default.
+      gmpClickable: true,
     });
+    const markerImage = Map.buildMarkerImage(this.getScaleImage(place.average_rating), 34);
+    marker.appendChild(markerImage);
 
     this.markersArray.push(marker);
 
@@ -487,19 +503,23 @@ export default class Map extends React.Component {
       (place.url ? `<a href="${place.url}" target="_blank" rel="noopener" style="font-size:12px" onclick="event.stopPropagation()">View on Google Maps</a>` : '') +
       '</div>';
 
-    google.maps.event.addListener(marker, 'mouseover', () => {
+    // AdvancedMarkerElement is a real HTMLElement, so hover is a plain DOM
+    // event on it rather than a google.maps.event listener. As before, the
+    // tooltip stays up until another marker replaces it.
+    marker.addEventListener('mouseenter', () => {
       this.infowindow.setContent(content);
       this.infowindow.open(this.googleMap, marker);
     });
 
-    google.maps.event.addListener(marker, 'click', () => {
+    marker.addEventListener('gmp-click', () => {
       this.props.showOverlay(true, `${place.name}<br/>(${typeText})`, place);
     });
   }
 
   clearOverlays() {
     for (let i = 0; i < this.markersArray.length; i++) {
-      this.markersArray[i].setMap(null);
+      // AdvancedMarkerElement has no setMap() - detach by nulling `map`.
+      this.markersArray[i].map = null;
     }
     this.markersArray.length = 0;
   }
