@@ -52,6 +52,10 @@ export default class Map extends React.Component {
     this.menuAnchor = null;
     this.map3dElem = null;
     this.markers3dArray = [];
+    // Screen coords of the last native click on the 3D map, recorded so the
+    // popup menu can be anchored where the user actually clicked (the
+    // library's gmp-click carries a ground position, not pixel coords).
+    this.lastPointerScreen = null;
     // undefined until importLibrary('maps3d') resolves/rejects the first
     // time the "Photorealistic 3D" view is selected - avoids loading that
     // (separately billed) library's tiles before it's actually asked for.
@@ -225,24 +229,39 @@ export default class Map extends React.Component {
     this.markers3dArray.push(marker);
   }
 
-  // The Photorealistic 3D Tiles viewer has no pixel-to-ground unprojection
-  // exposed the way the 2D map's click event hands back event.latLng/
-  // event.pixel - so "Set position"/"Add place" here target the current
-  // camera center rather than the exact point clicked. Good enough for
-  // comparison purposes; flagged clearly so it's not mistaken for the 2D
-  // view's precise click-to-location behavior.
+  // Map3DElement's own gmp-click hands back the ground position under the
+  // cursor (LocationClickEvent.position), so "Set position"/"Add place"
+  // land on the actual clicked point here, same as the 2D view. The screen
+  // coordinates for anchoring the popup menu come from the native click
+  // recorded just before this (see the ref callback in render()) - the
+  // library's synthetic event carries the location, not pixel coordinates.
   onMap3dClick(event) {
     this.props.closeMenu && this.props.closeMenu();
-    const center = this.map3dElem && this.map3dElem.center;
-    if (!center) {
+
+    // A marker's own gmp-click opens the vote overlay - don't also open the
+    // "add place" menu if that event reaches the map element too.
+    if (event.target && this.markers3dArray.indexOf(event.target) !== -1) {
       return;
     }
+
+    const position = event && event.position;
+    if (!position) {
+      // Click didn't land on the globe (empty sky, etc.)
+      return;
+    }
+    const lat = Map.readCoord(position, 'lat', null);
+    const lng = Map.readCoord(position, 'lng', null);
+    if (lat === null || lng === null) {
+      return;
+    }
+
+    const screen = this.lastPointerScreen || { x: 0, y: 0 };
     this.setState({
       ...this.state,
       popUpMenuOpen: true,
-      popUpMenuLeft: event.clientX,
-      popUpMenuTop: event.clientY,
-      lastClickLocation: { lat: center.lat, lng: center.lng },
+      popUpMenuLeft: screen.x,
+      popUpMenuTop: screen.y,
+      lastClickLocation: { lat, lng },
     });
   }
 
@@ -562,8 +581,19 @@ export default class Map extends React.Component {
               elem.center = { lat, lng, altitude: 200 };
               elem.tilt = 65;
               elem.range = 1200;
-              elem.mode = 'hybrid';
-              elem.addEventListener('click', (event) => this.onMap3dClick(event));
+              // MapMode enum name, uppercase - the property validates against
+              // the enum's constant names and rejects anything else (a
+              // lowercase 'hybrid' threw InvalidValueError and left the
+              // element on its default, MapMode.ROADMAP, so this view showed
+              // a tilted street map instead of photorealistic imagery).
+              elem.mode = 'HYBRID';
+              // Native click only records where on screen the user clicked,
+              // for anchoring the popup menu; gmp-click (the library's own
+              // event) is what carries the clicked ground position.
+              elem.addEventListener('click', (event) => {
+                this.lastPointerScreen = { x: event.clientX, y: event.clientY };
+              });
+              elem.addEventListener('gmp-click', (event) => this.onMap3dClick(event));
             }
           }}
           className="map"

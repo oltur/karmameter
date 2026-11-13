@@ -270,9 +270,8 @@ export default class HomePage extends React.Component {
   }
 
   // Opens the "Add a new place" dialog - triggered from Map.jsx's addPlace()
-  // (the "Add place" item on the map's click popup menu, both in the 2D/
-  // tilted view and - via the camera-center approximation there - the
-  // Photorealistic 3D view).
+  // (the "Add place" item on the map's click popup menu, in all three
+  // views).
   openAddPlaceForm(location) {
     this.setState({
       ...this.state,
@@ -297,8 +296,8 @@ export default class HomePage extends React.Component {
 
     // newPlaceLocation is a real google.maps.LatLng (lat()/lng() methods)
     // when it came from a 2D/tilted map click, or a plain {lat, lng} object
-    // when it came from the Photorealistic 3D view's camera-center
-    // approximation (see Map.jsx's onMap3dClick) - handle both.
+    // when it came from the Photorealistic 3D view's gmp-click position
+    // (see Map.jsx's onMap3dClick) - handle both.
     const lat = typeof newPlaceLocation.lat === 'function' ? newPlaceLocation.lat() : newPlaceLocation.lat;
     const lng = typeof newPlaceLocation.lng === 'function' ? newPlaceLocation.lng() : newPlaceLocation.lng;
 
