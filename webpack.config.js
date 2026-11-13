@@ -76,7 +76,11 @@ const developmentPlugins = [
 const productionPlugins = [
   ...pluginsBase,
   new LodashModuleReplacementPlugin(),
-  new ExtractTextPlugin('[name].css'),
+  // Content-hashed filename: a changed CSS build gets a new URL automatically,
+  // so visitors always get the latest build instead of a stale cached copy -
+  // the same problem that previously needed a manually-bumped `?v=` query
+  // string on every single deploy.
+  new ExtractTextPlugin('[name].[contenthash].css'),
   new webpack.optimize.OccurrenceOrderPlugin(),
   new webpack.optimize.UglifyJsPlugin({
     beautify: false,
@@ -107,7 +111,11 @@ module.exports = {
 
   output: {
     path: SETTINGS.PUBLIC_PATH,
-    filename: 'bundle.js',
+    // Hashed only in production: dev needs a stable filename (webpack-dev-
+    // server / scripts/start.js serve it from memory, no caching concern),
+    // but every production deploy must get a genuinely new URL or visitors
+    // keep running whatever JS they loaded before - see the .css comment.
+    filename: production ? 'bundle.[chunkhash].js' : 'bundle.js',
     publicPath: pagesBuild ? `/${getRepositoryName()}/` : '/',
   },
 
