@@ -56,15 +56,15 @@ const MAP_LANGUAGES = [
 ];
 
 // There is deliberately no manual "3D buildings" option: the standard map
-// now tilts itself once you zoom in far enough for buildings to be worth
-// showing (see AUTO_TILT_MIN_ZOOM in Map.jsx), so it was a mode nobody
-// needed to choose. What's left is the genuine either/or - the ordinary
-// vector map, or Google's separately-billed Photorealistic 3D Tiles.
+// is permanently on a 45-degree projection (see MAP_TILT_DEGREES in
+// Map.jsx), so it was a mode nobody needed to choose. What's left is the
+// genuine either/or - the ordinary vector map, or Google's separately-billed
+// Photorealistic 3D Tiles.
 const MAP_VIEW_MODES = [
   {
     value: 'flat',
     label: 'Standard',
-    hint: 'Tilts to show 3D buildings automatically as you zoom in. No extra cost.',
+    hint: '45° tilted view, with 3D buildings once you zoom in. No extra cost.',
   },
   {
     value: 'photorealistic',
@@ -989,7 +989,7 @@ export default class HomePage extends React.Component {
           <li>Use the category dropdown and distance slider to change what shows up nearby.</li>
           <li>Type an address and press Enter to search a different location.</li>
           <li>Tap the target button on the map to jump back to your current location.</li>
-          <li>Zoom in far enough and the map tilts on its own to show 3D buildings.</li>
+          <li>The map sits at a 45&deg; angle &mdash; zoom in to see buildings in 3D.</li>
           <li>Sign in with Google so your votes are attributed to your name.</li>
         </ul>
         <p>
