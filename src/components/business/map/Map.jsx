@@ -61,6 +61,10 @@ export default class Map extends React.Component {
     this.menuAnchor = null;
     this.map3dElem = null;
     this.markers3dArray = [];
+    // maps3d's PopoverElement - the Photorealistic view's equivalent of the
+    // 2D InfoWindow. Created lazily once that library has loaded.
+    this.popover3d = null;
+    this.popover3dContent = null;
     // Screen coords of the last native click on the 3D map, recorded so the
     // popup menu can be anchored where the user actually clicked (the
     // library's gmp-click carries a ground position, not pixel coords).
@@ -194,6 +198,11 @@ export default class Map extends React.Component {
   }
 
   clear3dMarkers() {
+    // Close first: the popover anchors to a marker that's about to be
+    // removed from the DOM, so leaving it open would strand it.
+    if (this.popover3d) {
+      this.popover3d.open = false;
+    }
     for (let i = 0; i < this.markers3dArray.length; i++) {
       const marker = this.markers3dArray[i];
       if (marker.parentNode) {
@@ -241,8 +250,53 @@ export default class Map extends React.Component {
       this.props.showOverlay(true, `${place.name}<br/>(${typeText})`, place);
     });
 
+    // Hover preview, matching the 2D InfoWindow. google.maps.InfoWindow only
+    // attaches to a 2D map, so this view needs maps3d's own PopoverElement -
+    // without it the Photorealistic view had markers you could click but no
+    // photo preview at all. gmp-pointerover is the 3D equivalent of the
+    // mouseenter used on the 2D markers.
+    marker.addEventListener('gmp-pointerover', () => {
+      this.showPlacePopover(marker, place);
+    });
+
     this.map3dElem.appendChild(marker);
     this.markers3dArray.push(marker);
+  }
+
+  // One popover reused for every marker, the same way a single InfoWindow is
+  // reused in the 2D view - rather than attaching one per marker.
+  ensure3dPopover() {
+    if (this.popover3d) {
+      return this.popover3d;
+    }
+    const maps3d = google.maps && google.maps.maps3d;
+    if (!this.map3dElem || !maps3d || !maps3d.PopoverElement) {
+      return null;
+    }
+    const popover = new maps3d.PopoverElement({ open: false });
+    const content = document.createElement('div');
+    // NO slot attribute: the popover body is the *unnamed* default slot, so
+    // content reaches it by having no slot at all. Setting slot="default"
+    // (which the docs' phrase "default slot" invites) matches no slot, and
+    // the popover then renders as an empty 0x0 bubble - assignedSlot comes
+    // back null. Only the "header" slot is actually named.
+    popover.appendChild(content);
+    this.map3dElem.appendChild(popover);
+    this.popover3d = popover;
+    this.popover3dContent = content;
+    return popover;
+  }
+
+  showPlacePopover(marker, place) {
+    const popover = this.ensure3dPopover();
+    if (!popover) {
+      return;
+    }
+    this.popover3dContent.innerHTML = Map.buildPlacePreviewHtml(place);
+    // positionAnchor accepts the marker itself, so the popover tracks it
+    // without us recomputing a position.
+    popover.positionAnchor = marker;
+    popover.open = true;
   }
 
   // Map3DElement's own gmp-click hands back the ground position under the
@@ -503,23 +557,8 @@ export default class Map extends React.Component {
 
     this.markersArray.push(marker);
 
-    const ratingText = place.average_rating === -1 ? 'NA' : `${Math.round(place.average_rating * 10) / 10} / 5`;
     const typeText = Helpers.decodeGoogleLocationName(place.types[0]);
-    place.displayText = `${place.name.replace(/'/g, '&#39;')}<br/>${ratingText}</br/>(${typeText})`;
-
-    const photoUrl = place.photos && place.photos[0] && place.photos[0].photo_reference
-      ? Helpers.getPhotoUrl(place.photos[0].photo_reference, 220)
-      : null;
-
-    // The whole tooltip (minus the Maps link, which stops propagation so it
-    // navigates instead) is clickable to open the up/down-vote flow - a
-    // quicker path than requiring the user to click the marker pin itself.
-    const content = '<div style="max-width:220px;cursor:pointer" ' +
-      `onclick="window.HomePage.voteFromMarker('${place.place_id}'); return false;">` +
-      (photoUrl ? `<img src="${photoUrl}" style="width:100%;border-radius:4px;margin-bottom:4px;display:block"/>` : '') +
-      `<div>${place.displayText}</div>` +
-      (place.url ? `<a href="${place.url}" target="_blank" rel="noopener" style="font-size:12px" onclick="event.stopPropagation()">View on Google Maps</a>` : '') +
-      '</div>';
+    const content = Map.buildPlacePreviewHtml(place);
 
     // AdvancedMarkerElement is a real HTMLElement, so hover is a plain DOM
     // event on it rather than a google.maps.event listener. As before, the
@@ -532,6 +571,30 @@ export default class Map extends React.Component {
     marker.addEventListener('gmp-click', () => {
       this.props.showOverlay(true, `${place.name}<br/>(${typeText})`, place);
     });
+  }
+
+  // Shared by the 2D InfoWindow and the Photorealistic view's PopoverElement
+  // so the two previews can't drift apart - the 3D view originally had no
+  // hover preview at all, which is the gap this was extracted to close.
+  // Also sets place.displayText, which the rest of the app reads.
+  static buildPlacePreviewHtml(place) {
+    const ratingText = place.average_rating === -1 ? 'NA' : `${Math.round(place.average_rating * 10) / 10} / 5`;
+    const typeText = Helpers.decodeGoogleLocationName(place.types[0]);
+    place.displayText = `${place.name.replace(/'/g, '&#39;')}<br/>${ratingText}</br/>(${typeText})`;
+
+    const photoUrl = place.photos && place.photos[0] && place.photos[0].photo_reference
+      ? Helpers.getPhotoUrl(place.photos[0].photo_reference, 220)
+      : null;
+
+    // The whole tooltip (minus the Maps link, which stops propagation so it
+    // navigates instead) is clickable to open the up/down-vote flow - a
+    // quicker path than requiring the user to click the marker pin itself.
+    return '<div style="max-width:220px;cursor:pointer" ' +
+      `onclick="window.HomePage.voteFromMarker('${place.place_id}'); return false;">` +
+      (photoUrl ? `<img src="${photoUrl}" style="width:100%;border-radius:4px;margin-bottom:4px;display:block"/>` : '') +
+      `<div>${place.displayText}</div>` +
+      (place.url ? `<a href="${place.url}" target="_blank" rel="noopener" style="font-size:12px" onclick="event.stopPropagation()">View on Google Maps</a>` : '') +
+      '</div>';
   }
 
   clearOverlays() {
