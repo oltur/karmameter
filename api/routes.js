@@ -17,6 +17,79 @@ module.exports = function (ctx) {
     // assign collection to variable for further use
     const collection = db.collection('places')
 
+    // --- Nearby-search cache -------------------------------------------
+    // Records that we have ALREADY asked Google about a given area, so the
+    // fallback in /nearbySearch doesn't ask again for a week.
+    //
+    // Without this, the `docs.length < LIMIT - 5` condition below means any
+    // area holding fewer than 15 places of the requested type hits the
+    // Places API on EVERY request - every page load, every slider move,
+    // every category change - because a sparse area can never satisfy the
+    // condition no matter how many times we fetch it. Rural locations
+    // therefore re-billed a Nearby Search plus up to 20 Place Details calls
+    // indefinitely.
+    const nearbyCache = db.collection('nearby_cache')
+    const NEARBY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+    // ~110m grid. Centres are rounded onto it so that coming back to roughly
+    // the same spot reuses the entry instead of minting a new key per metre
+    // of GPS jitter.
+    const NEARBY_CACHE_GRID_DECIMALS = 3
+
+    // Mongo expires the documents itself; the explicit fetchedAt check in
+    // hasFreshNearbySearch is what actually governs behaviour, this just
+    // stops the collection growing forever.
+    nearbyCache.createIndex(
+        { fetchedAt: 1 },
+        { expireAfterSeconds: Math.floor(NEARBY_CACHE_TTL_MS / 1000) }
+    ).catch((err) => console.log('nearby_cache TTL index not created:', err.message))
+
+    function nearbyGrid(value) {
+        return parseFloat(value.toFixed(NEARBY_CACHE_GRID_DECIMALS))
+    }
+
+    async function hasFreshNearbySearch(location, radius, type) {
+        try {
+            const entry = await nearbyCache.findOne({
+                gridLat: nearbyGrid(location.lat),
+                gridLng: nearbyGrid(location.lng),
+                type: type,
+                // A previous search over a WIDER radius already covers this
+                // one, so narrowing the distance slider doesn't re-query.
+                radius: { $gte: radius },
+                fetchedAt: { $gt: new Date(Date.now() - NEARBY_CACHE_TTL_MS) }
+            })
+            return !!entry
+        } catch (err) {
+            // Never let a cache failure stop the request - fall through to
+            // the old behaviour instead.
+            console.log('nearby_cache lookup failed:', err.message)
+            return false
+        }
+    }
+
+    async function recordNearbySearch(location, radius, type, resultCount) {
+        const gridLat = nearbyGrid(location.lat)
+        const gridLng = nearbyGrid(location.lng)
+        try {
+            await nearbyCache.updateOne(
+                { _id: `${gridLat},${gridLng},${radius},${type}` },
+                {
+                    $set: {
+                        gridLat: gridLat,
+                        gridLng: gridLng,
+                        radius: radius,
+                        type: type,
+                        resultCount: resultCount,
+                        fetchedAt: new Date()
+                    }
+                },
+                { upsert: true }
+            )
+        } catch (err) {
+            console.log('nearby_cache write failed:', err.message)
+        }
+    }
+
     // /**
     //  * Import data
     //  */
@@ -183,6 +256,10 @@ module.exports = function (ctx) {
         let googleQueried = false;
 
         try {
+            // Already asked Google about this area within the TTL - serve
+            // whatever we stored last time and skip the billable call
+            // entirely, however few results that turns out to be.
+            const alreadySearched = await hasFreshNearbySearch(location, radius, type);
             while(true) {
                 var docs = await collection.aggregate([
                     {
@@ -198,7 +275,7 @@ module.exports = function (ctx) {
                     { $limit: LIMIT },
                     // { $match: { "dist.calculated": { $lt: radius } } },
                 ]).toArray();
-                if(!googleQueried && (!docs || docs.length < LIMIT - 5))
+                if(!googleQueried && !alreadySearched && (!docs || docs.length < LIMIT - 5))
                 {
                     try {
                         var r = await client.placesNearby({
@@ -213,6 +290,11 @@ module.exports = function (ctx) {
                         await Promise.all(r.data.results.map((place) => {
                             return getPlaceDetailsAndCreatePlaceIfNotExists(place.place_id)
                             }))
+                            // Record BEFORE looping back round, so this area
+                            // is marked searched even if it yielded nothing.
+                            // That empty case is precisely the one that used
+                            // to re-bill on every single request.
+                            await recordNearbySearch(location, radius, type, r.data.results.length);
                             googleQueried = true;
                     }
                     catch(err) {
@@ -260,15 +342,18 @@ module.exports = function (ctx) {
         next()
     })
 
-    function getPlaceDetailsAndCreatePlaceIfNotExists(googlePlaceId) {
-        return getPlaceDetails(googlePlaceId)
-            .then((place) => {
-                return createPlaceIfNotExists(place);
-            })
-            .then(place => {
-                console.log(place);
-                return place;
-            })
+    async function getPlaceDetailsAndCreatePlaceIfNotExists(googlePlaceId) {
+        // Check our own copy FIRST. This previously fetched Place Details and
+        // only then asked whether the place already existed - so every place
+        // we already had still cost a billable Details call whose result was
+        // thrown away, up to 20 of them per nearby search. Place Details is
+        // charged per call regardless of whether we keep the answer.
+        const existing = await collection.findOne({ place_id: googlePlaceId })
+        if (existing) {
+            return existing
+        }
+        const place = await getPlaceDetails(googlePlaceId)
+        return createPlaceIfNotExists(place)
     }
 
     function getPlaceDetails(googlePlaceId) {
