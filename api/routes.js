@@ -2,6 +2,10 @@
 
 var moment = require('moment');
 var axios = require('axios');
+var fs = require('fs');
+var fsp = require('fs').promises;
+var path = require('path');
+var crypto = require('crypto');
 
 const {Client} = require("@googlemaps/google-maps-services-js");
 
@@ -45,6 +49,82 @@ module.exports = function (ctx) {
 
     function nearbyGrid(value) {
         return parseFloat(value.toFixed(NEARBY_CACHE_GRID_DECIMALS))
+    }
+
+    // --- Place photo cache ----------------------------------------------
+    // Every marker tooltip and every vote overlay fetches a photo through
+    // /places/photo, which is a billable Places Photo call each time. The
+    // route already sets a browser Cache-Control, but that only helps a
+    // repeat view in the SAME browser - a new visitor, a new device or a
+    // cleared cache re-bought the identical image. These files never change
+    // for a given photo reference, so they are cached on disk here and the
+    // Google call is made once per photo per TTL.
+    //
+    // Lives inside the api directory, which deploys only ever scp new files
+    // into - so the cache survives deploys and pm2 restarts.
+    const PHOTO_CACHE_DIR = path.join(__dirname, '.photo-cache')
+    // 30 days. Google's Maps Platform terms allow temporary caching of
+    // content for a limited period (place IDs being the long-lived
+    // exception); worth re-checking against the current terms if this is
+    // ever raised much higher.
+    const PHOTO_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+    // Content type is recovered from the file extension, so no sidecar
+    // metadata file is needed.
+    const PHOTO_EXT_TYPES = {
+        jpg: 'image/jpeg',
+        png: 'image/png',
+        webp: 'image/webp',
+        gif: 'image/gif'
+    }
+
+    try {
+        fs.mkdirSync(PHOTO_CACHE_DIR, { recursive: true })
+    } catch (err) {
+        console.log('photo cache dir not created:', err.message)
+    }
+
+    function photoCacheKey(photoRef, maxwidth) {
+        // Hashed, so the (attacker-supplied) reference can never influence
+        // the path - the filename is always plain hex.
+        return crypto.createHash('sha1').update(`${photoRef}|${maxwidth}`).digest('hex')
+    }
+
+    function photoExtFor(contentType) {
+        const match = Object.keys(PHOTO_EXT_TYPES)
+            .find((ext) => PHOTO_EXT_TYPES[ext] === contentType)
+        return match || 'jpg'
+    }
+
+    async function readPhotoCache(key) {
+        for (const ext of Object.keys(PHOTO_EXT_TYPES)) {
+            const file = path.join(PHOTO_CACHE_DIR, `${key}.${ext}`)
+            try {
+                const stat = await fsp.stat(file)
+                if (Date.now() - stat.mtimeMs > PHOTO_CACHE_TTL_MS) {
+                    await fsp.unlink(file).catch(() => {})
+                    return null
+                }
+                return { data: await fsp.readFile(file), contentType: PHOTO_EXT_TYPES[ext] }
+            } catch (err) {
+                // Not cached under this extension - try the next.
+            }
+        }
+        return null
+    }
+
+    async function writePhotoCache(key, contentType, data) {
+        const ext = photoExtFor(contentType)
+        const finalPath = path.join(PHOTO_CACHE_DIR, `${key}.${ext}`)
+        const tempPath = `${finalPath}.${process.pid}.tmp`
+        try {
+            // Write-then-rename: rename is atomic, so a concurrent request
+            // can never read a half-written image.
+            await fsp.writeFile(tempPath, data)
+            await fsp.rename(tempPath, finalPath)
+        } catch (err) {
+            console.log('photo cache write failed:', err.message)
+            await fsp.unlink(tempPath).catch(() => {})
+        }
     }
 
     async function hasFreshNearbySearch(location, radius, type) {
@@ -142,6 +222,19 @@ module.exports = function (ctx) {
             next();
             return;
         }
+        const cacheKey = photoCacheKey(photoRef, maxwidth);
+        const cached = await readPhotoCache(cacheKey);
+        if (cached) {
+            res.writeHead(200, {
+                'Content-Type': cached.contentType,
+                'Cache-Control': 'public, max-age=86400',
+                'X-Photo-Cache': 'HIT'
+            });
+            res.end(cached.data);
+            next();
+            return;
+        }
+
         try {
             const r = await axios.get('https://maps.googleapis.com/maps/api/place/photo', {
                 params: {
@@ -151,12 +244,19 @@ module.exports = function (ctx) {
                 },
                 responseType: 'arraybuffer'
             });
+            const contentType = r.headers['content-type'] || 'image/jpeg';
+            const body = Buffer.from(r.data);
+            // Serve first, persist after - a cache write problem must never
+            // delay or break the response.
             res.writeHead(200, {
-                'Content-Type': r.headers['content-type'] || 'image/jpeg',
-                'Cache-Control': 'public, max-age=86400'
+                'Content-Type': contentType,
+                'Cache-Control': 'public, max-age=86400',
+                'X-Photo-Cache': 'MISS'
             });
-            res.end(r.data);
+            res.end(body);
             next();
+            await writePhotoCache(cacheKey, contentType, body);
+            return;
         } catch (err) {
             console.log('places/photo failed:', err.message);
             res.send(502, { message: 'photo fetch failed' });

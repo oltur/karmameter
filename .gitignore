@@ -26,3 +26,7 @@ jspm_packages
 .stylelintcache
 node_modules
 backups/
+
+# Server-side Place Photo cache (see /places/photo in api/routes.js) -
+# generated at runtime, never committed.
+api/.photo-cache/
