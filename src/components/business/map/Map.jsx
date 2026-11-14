@@ -18,6 +18,14 @@ import imageMyLocation from '../../../images/my-location.png';
 // costs nothing extra versus a normal map load.
 const MAP_ID = '31cb9021a132e7b13954ff29';
 
+// The standard map tilts itself once you're zoomed in far enough for
+// building geometry to actually be worth showing - replacing what used to be
+// a manual "3D buildings" mode nobody needed to pick. Google's vector tiles
+// only carry extruded buildings from roughly this zoom anyway, so tilting
+// earlier just skews a flat map.
+const AUTO_TILT_MIN_ZOOM = 17;
+const AUTO_TILT_DEGREES = 45;
+
 // NOTE: this component no longer queries google.maps.places.PlacesService
 // client-side. Place data (already enriched with our own ratings) is fetched
 // by HomePage via ApiService and handed down as the `places` prop; this
@@ -34,7 +42,7 @@ export default class Map extends React.Component {
     showOverlay: PropTypes.func,
     closeMenu: PropTypes.func,
     currentUser: PropTypes.object,
-    mapViewMode: PropTypes.oneOf(['flat', 'tilted', 'photorealistic']),
+    mapViewMode: PropTypes.oneOf(['flat', 'photorealistic']),
     openAddPlaceForm: PropTypes.func,
   }
 
@@ -52,6 +60,9 @@ export default class Map extends React.Component {
     this.menuAnchor = null;
     this.map3dElem = null;
     this.markers3dArray = [];
+    // null until the first zoom evaluation; then true/false for "currently
+    // tilted by the auto rule" - see syncAutoTilt.
+    this.autoTiltApplied = null;
     // Screen coords of the last native click on the 3D map, recorded so the
     // popup menu can be anchored where the user actually clicked (the
     // library's gmp-click carries a ground position, not pixel coords).
@@ -115,19 +126,37 @@ export default class Map extends React.Component {
     }
   }
 
-  // Switches between the three comparison views. 'flat'/'tilted' both use
-  // the regular 2D google.maps.Map (just a tilt difference); 'photorealistic'
-  // swaps to the separate <gmp-map-3d> element instead, lazily loading the
-  // maps3d library the first time it's selected.
+  // 'flat' is the ordinary 2D google.maps.Map (which tilts itself by zoom -
+  // see syncAutoTilt); 'photorealistic' swaps to the separate <gmp-map-3d>
+  // element instead, lazily loading the maps3d library the first time it's
+  // selected.
   applyViewMode(mode) {
     if (mode === 'photorealistic') {
       this.showPhotorealistic3D();
       return;
     }
     this.hidePhotorealistic3D();
-    if (this.googleMap) {
-      this.googleMap.setTilt(mode === 'tilted' ? 45 : 0);
+    // Forget the last decision so returning to the flat map re-evaluates the
+    // current zoom rather than assuming the tilt state we left it in.
+    this.autoTiltApplied = null;
+    this.syncAutoTilt();
+  }
+
+  // Tilts the standard map in and out automatically as you cross the zoom
+  // threshold. Deliberately only acts ON a crossing (autoTiltApplied tracks
+  // the last decision) rather than on every zoom event, so a tilt the user
+  // set themselves - vector maps allow ctrl+drag - isn't immediately
+  // overridden while they stay at the same zoom level.
+  syncAutoTilt() {
+    if (!this.googleMap || this.props.mapViewMode === 'photorealistic') {
+      return;
     }
+    const shouldTilt = this.googleMap.getZoom() >= AUTO_TILT_MIN_ZOOM;
+    if (shouldTilt === this.autoTiltApplied) {
+      return;
+    }
+    this.autoTiltApplied = shouldTilt;
+    this.googleMap.setTilt(shouldTilt ? AUTO_TILT_DEGREES : 0);
   }
 
   showPhotorealistic3D() {
@@ -370,9 +399,8 @@ export default class Map extends React.Component {
       console.log('MAP_ID is empty - AdvancedMarkerElement needs a Map ID, so no markers will render.');
     }
     this.googleMap = new google.maps.Map(this.mapElem, mapOptions);
-    if (this.props.mapViewMode === 'tilted') {
-      this.googleMap.setTilt(45);
-    }
+    google.maps.event.addListener(this.googleMap, 'zoom_changed', () => this.syncAutoTilt());
+    this.syncAutoTilt();
 
     this.locationMarker = new google.maps.marker.AdvancedMarkerElement({
       position: this.getPosition(),

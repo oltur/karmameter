@@ -15,6 +15,8 @@ import Loader from 'react-loader-advanced';
 import Login from 'material-ui/svg-icons/action/flight-land';
 import Logout from 'material-ui/svg-icons/action/flight-takeoff';
 import Account from 'material-ui/svg-icons/action/account-box';
+import SettingsIcon from 'material-ui/svg-icons/action/settings';
+import HelpIcon from 'material-ui/svg-icons/action/help-outline';
 
 import Slider from 'material-ui/Slider';
 
@@ -53,6 +55,24 @@ const MAP_LANGUAGES = [
   { value: 'uk', label: 'Українська' },
 ];
 
+// There is deliberately no manual "3D buildings" option: the standard map
+// now tilts itself once you zoom in far enough for buildings to be worth
+// showing (see AUTO_TILT_MIN_ZOOM in Map.jsx), so it was a mode nobody
+// needed to choose. What's left is the genuine either/or - the ordinary
+// vector map, or Google's separately-billed Photorealistic 3D Tiles.
+const MAP_VIEW_MODES = [
+  {
+    value: 'flat',
+    label: 'Standard',
+    hint: 'Tilts to show 3D buildings automatically as you zoom in. No extra cost.',
+  },
+  {
+    value: 'photorealistic',
+    label: 'Photorealistic 3D',
+    hint: 'Google\'s 3D Tiles imagery. Billed separately - needs the Map Tiles API enabled in Cloud Console.',
+  },
+];
+
 // Only these Google accounts may actually sign in - anyone else's token is
 // fetched successfully (OAuth itself succeeds) but rejected client-side
 // before setCurrentUser ever runs.
@@ -70,10 +90,12 @@ const GEOLOCATION_OPTIONS = { timeout: 10000, maximumAge: 60000 };
 // Deliberately its own small {lat, lng} entry rather than reusing the
 // whole-state blob written in componentDidUpdate - that one carries the
 // entire places array and is never read back.
-const POSITION_STORAGE_PREFIX = 'map';
+const STORAGE_PREFIX = 'map';
 const POSITION_STORAGE_KEY = 'lastPosition';
-const LANGUAGE_STORAGE_KEY = 'language';
-const SEARCH_STORAGE_KEY = 'search';
+// Everything the Settings overlay and the menu's search controls own, in one
+// entry. Position stays separate because it changes constantly (every pan
+// and address lookup) while these change rarely.
+const PREFS_STORAGE_KEY = 'prefs';
 
 const MIN_DISTANCE = 100;
 const MAX_DISTANCE = 50000;
@@ -85,30 +107,31 @@ const DEFAULT_CATEGORY_NAMES = [
   'Accounting', 'Airport', 'Amusement Park', 'Aquarium', 'Art Gallery', 'Atm', 'Bakery', 'Bank', 'Bar', 'Beauty Salon', 'Bicycle Store', 'Book Store', 'Bowling Alley', 'Bus Station', 'Cafe', 'Campground', 'Car Dealer', 'Car Rental', 'Car Repair', 'Car Wash', 'Casino', 'Cemetery', 'Church', 'City Hall', 'Clothing Store', 'Convenience Store', 'Courthouse', 'Dentist', 'Department Store', 'Doctor', 'Electrician', 'Electronics Store', 'Embassy', 'Fire Station', 'Florist', 'Funeral Home', 'Furniture Store', 'Gas Station', 'Gym', 'Hair Care', 'Hardware Store', 'Hindu Temple', 'Home Goods Store', 'Hospital', 'Insurance Agency', 'Jewelry Store', 'Laundry', 'Lawyer', 'Library', 'Liquor Store', 'Local Government Office', 'Locksmith', 'Lodging', 'Meal Delivery', 'Meal Takeaway', 'Mosque', 'Movie Rental', 'Movie Theater', 'Moving Company', 'Museum', 'Night Club', 'Painter', 'Park', 'Parking', 'Pet Store', 'Pharmacy', 'Physiotherapist', 'Plumber', 'Police', 'Post Office', 'Real Estate Agency', 'Restaurant', 'Roofing Contractor', 'Rv Park', 'School', 'Shoe Store', 'Shopping Mall', 'Spa', 'Stadium', 'Storage', 'Store', 'Subway Station', 'Synagogue', 'Taxi Stand', 'Train Station', 'Transit Station', 'Travel Agency', 'University', 'Veterinary Care', 'Zoo',
 ];
 
-// Reads are validated against what the app actually accepts rather than
-// trusted: these entries are user-editable (devtools, a stale build, a
-// hand-edited profile), and a bad value would otherwise reach the Maps API
-// or the SelectField as-is.
-function readStoredLanguage(storageService) {
+// Every field is validated against what the app actually accepts rather than
+// trusted: this entry is user-editable (devtools, a stale build from before
+// an option was renamed), and a bad value would otherwise reach the Maps API
+// or leave a SelectField bound to an option that doesn't exist. Anything
+// unrecognised - including the retired 'tilted' view mode - falls back to its
+// default instead of being passed through.
+function readStoredPrefs(storageService) {
+  const defaults = {
+    language: 'default', distance: null, selectedTypes: null, mapViewMode: 'flat',
+  };
   try {
-    const value = storageService.getData(POSITION_STORAGE_PREFIX, LANGUAGE_STORAGE_KEY);
-    return MAP_LANGUAGES.some((lang) => lang.value === value) ? value : 'default';
+    const saved = storageService.getData(STORAGE_PREFIX, PREFS_STORAGE_KEY) || {};
+    return {
+      language: MAP_LANGUAGES.some((lang) => lang.value === saved.language)
+        ? saved.language : defaults.language,
+      mapViewMode: MAP_VIEW_MODES.some((mode) => mode.value === saved.mapViewMode)
+        ? saved.mapViewMode : defaults.mapViewMode,
+      distance: (typeof saved.distance === 'number' &&
+        saved.distance >= MIN_DISTANCE && saved.distance <= MAX_DISTANCE)
+        ? saved.distance : defaults.distance,
+      selectedTypes: (typeof saved.selectedTypes === 'string' && saved.selectedTypes)
+        ? saved.selectedTypes : defaults.selectedTypes,
+    };
   } catch (e) {
-    return 'default';
-  }
-}
-
-function readStoredSearch(storageService) {
-  try {
-    const saved = storageService.getData(POSITION_STORAGE_PREFIX, SEARCH_STORAGE_KEY) || {};
-    const distance = (typeof saved.distance === 'number' &&
-      saved.distance >= MIN_DISTANCE && saved.distance <= MAX_DISTANCE)
-      ? saved.distance : null;
-    const selectedTypes = (typeof saved.selectedTypes === 'string' && saved.selectedTypes)
-      ? saved.selectedTypes : null;
-    return { distance, selectedTypes };
-  } catch (e) {
-    return { distance: null, selectedTypes: null };
+    return defaults;
   }
 }
 
@@ -126,13 +149,15 @@ export default class HomePage extends React.Component {
     // render and the first retrievePlaces() already use them - otherwise
     // changing the map language (which reloads the page) would visibly
     // reset the category and radius on every switch.
-    const savedSearch = readStoredSearch(this.storageService);
-    this.mapLanguage = readStoredLanguage(this.storageService);
+    const prefs = readStoredPrefs(this.storageService);
+    // Authoritative copy, read before the Maps script URL is built in
+    // componentDidMount - the state field below only exists to bind the UI.
+    this.mapLanguage = prefs.language;
 
     // A restored category may be a custom one typed into Add Place ("Home"),
     // which isn't in the built-in list - append it, or the SelectField would
     // have a value matching none of its options and render blank.
-    const selectedTypes = savedSearch.selectedTypes || 'Restaurant';
+    const selectedTypes = prefs.selectedTypes || 'Restaurant';
     const names = DEFAULT_CATEGORY_NAMES.slice();
     if (!names.includes(selectedTypes)) {
       names.push(selectedTypes);
@@ -146,21 +171,20 @@ export default class HomePage extends React.Component {
       loaderVoteText: '',
       loaderPlace: null,
       helpVisible: false,
-      distance: savedSearch.distance || 1000,
-      // Mirrors this.mapLanguage so the SelectField has something to bind to;
-      // the authoritative copy is the instance field, read before the Maps
-      // script URL is built in componentDidMount.
+      settingsVisible: false,
+      distance: prefs.distance || 1000,
+      // Mirrors this.mapLanguage so the UI has something to bind to; the
+      // authoritative copy is the instance field above.
       mapLanguage: this.mapLanguage,
       // Confirmed: not read from storageService - every page load starts
       // signed out, regardless of a previous session.
       currentUser: null,
       menuVisible: false,
       inputValueAddress: '',
-      // 'flat' (default, no extra cost) - 'tilted' (free 3D-buildings tilt,
-      // needs a vector Map ID - see MAP_ID in Map.jsx) - 'photorealistic'
-      // (separately billed Photorealistic 3D Tiles, needs the Map Tiles API
-      // enabled in Cloud Console).
-      mapViewMode: 'flat',
+      // 'flat' (the ordinary vector map, which tilts itself as you zoom in)
+      // or 'photorealistic' (separately billed 3D Tiles, needs the Map Tiles
+      // API enabled in Cloud Console). See MAP_VIEW_MODES.
+      mapViewMode: prefs.mapViewMode,
       names,
       // NOTE: production reads `this.state.selectedTypes.toLowerCase()` (a
       // single string, not the 2018 multi-select array) when calling
@@ -244,12 +268,13 @@ export default class HomePage extends React.Component {
       this.savePosition(this.state.position);
     }
     // Persisted so the page reload that applies a map-language change (see
-    // handleMapLanguageChange) doesn't throw away the current search.
+    // handleMapLanguageChange) doesn't throw away everything else.
     if (
       this.state.distance !== prevState.distance ||
-      this.state.selectedTypes !== prevState.selectedTypes
+      this.state.selectedTypes !== prevState.selectedTypes ||
+      this.state.mapViewMode !== prevState.mapViewMode
     ) {
-      this.saveSearchSettings();
+      this.savePrefs();
     }
     if (
       this.state.distance !== prevState.distance ||
@@ -469,6 +494,13 @@ export default class HomePage extends React.Component {
     if (event.keyCode === 27) {
       this.showOverlay(false);
       this.closeMenu();
+      // Escape previously left the Help overlay open, which was its own
+      // small bug - both overlays now dismiss with it.
+      this.setState((prevState) => (
+        (prevState.helpVisible || prevState.settingsVisible)
+          ? { ...prevState, helpVisible: false, settingsVisible: false }
+          : prevState
+      ));
     }
   }
 
@@ -478,7 +510,7 @@ export default class HomePage extends React.Component {
   // would also re-prompt for location permission on every single visit).
   restoreSavedPosition() {
     try {
-      const saved = this.storageService.getData(POSITION_STORAGE_PREFIX, POSITION_STORAGE_KEY);
+      const saved = this.storageService.getData(STORAGE_PREFIX, POSITION_STORAGE_KEY);
       if (!saved || typeof saved.lat !== 'number' || typeof saved.lng !== 'number') {
         return false;
       }
@@ -493,29 +525,32 @@ export default class HomePage extends React.Component {
     }
   }
 
-  saveSearchSettings() {
+  savePrefs(overrides = {}) {
     try {
-      this.storageService.setData(POSITION_STORAGE_PREFIX, SEARCH_STORAGE_KEY, {
+      this.storageService.setData(STORAGE_PREFIX, PREFS_STORAGE_KEY, {
         distance: this.state.distance,
         selectedTypes: this.state.selectedTypes,
+        mapViewMode: this.state.mapViewMode,
+        language: this.mapLanguage,
+        ...overrides,
       });
+      return true;
     } catch (e) {
       // localStorage can throw (Safari private mode, quota) - never let
       // persistence failure break the map itself.
+      return false;
     }
   }
 
   // Google Maps bakes `language` in when its script loads and offers no
   // runtime setter for the 2D map; it also refuses to load twice on one
   // page. So applying a new choice means reloading - which is seamless
-  // because position and search settings are both persisted.
-  handleMapLanguageChange = (event, index, mapLanguage) => {
+  // because position and the rest of the prefs are persisted.
+  handleMapLanguageChange = (mapLanguage) => {
     if (mapLanguage === this.state.mapLanguage) {
       return;
     }
-    try {
-      this.storageService.setData(POSITION_STORAGE_PREFIX, LANGUAGE_STORAGE_KEY, mapLanguage);
-    } catch (e) {
+    if (!this.savePrefs({ language: mapLanguage })) {
       // Can't persist it, so a reload would silently revert - tell the user
       // instead of appearing to do nothing.
       alert('Could not save the language setting (browser storage is unavailable).');
@@ -534,7 +569,7 @@ export default class HomePage extends React.Component {
       if (typeof lat !== 'number' || typeof lng !== 'number') {
         return;
       }
-      this.storageService.setData(POSITION_STORAGE_PREFIX, POSITION_STORAGE_KEY, { lat, lng });
+      this.storageService.setData(STORAGE_PREFIX, POSITION_STORAGE_KEY, { lat, lng });
     } catch (e) {
       // localStorage can throw (Safari private mode, quota) - never let
       // persistence failure break the map itself.
@@ -633,7 +668,7 @@ export default class HomePage extends React.Component {
     this.closeMenu();
   }
 
-  handleMapViewModeChange = (event, index, mapViewMode) => {
+  handleMapViewModeChange = (mapViewMode) => {
     // Functional updater - see the comment on closeMenu() for why a plain
     // {...this.state} snapshot here would risk stomping another setState
     // queued in the same batch.
@@ -674,7 +709,15 @@ export default class HomePage extends React.Component {
   }
 
   closeHelp = () => {
-    this.setState({ ...this.state, helpVisible: false });
+    this.setState((prevState) => ({ ...prevState, helpVisible: false }));
+  }
+
+  openSettings = () => {
+    this.setState((prevState) => ({ ...prevState, menuVisible: false, settingsVisible: true }));
+  }
+
+  closeSettings = () => {
+    this.setState((prevState) => ({ ...prevState, settingsVisible: false }));
   }
 
   menuItems() {
@@ -688,13 +731,20 @@ export default class HomePage extends React.Component {
   }
 
   render() {
+    const distanceLabel = this.state.distance >= 1000
+      ? `${(this.state.distance / 1000).toFixed(this.state.distance % 1000 === 0 ? 0 : 1)} km`
+      : `${this.state.distance} m`;
+
     const sliderDistance = (
       <div className="slider">
-        <div className="slider-label">Distance: {this.state.distance} m.</div>
+        <div className="slider-label">
+          <span>Distance</span>
+          <span className="slider-value">{distanceLabel}</span>
+        </div>
         <Slider
           className="slider-inner"
-          min={100}
-          max={50000}
+          min={MIN_DISTANCE}
+          max={MAX_DISTANCE}
           step={100}
           value={this.state.distance}
           onChange={debounce(this.handleDistanceSlider, 300)}
@@ -706,8 +756,10 @@ export default class HomePage extends React.Component {
       <TextField
         className="geocoder"
         ref={(elem) => { this.textFieldAddress = elem; }}
-        floatingLabelText="Enter an address to look for"
+        floatingLabelText="Find an address"
+        hintText="Type an address, press Enter"
         floatingLabelFixed
+        fullWidth
         onKeyDown={(event) => this.handleAddressKeyDown(event)}
         value={this.state.inputValueAddress}
         onChange={evt => this.handleUpdateAddressValue(evt)}
@@ -766,42 +818,12 @@ export default class HomePage extends React.Component {
     const placesCategory = (
       <SelectField
         className="places-category"
-        floatingLabelText="Choose places category"
+        floatingLabelText="Category"
         value={this.state.selectedTypes}
         onChange={this.handleTypesChange}
+        fullWidth
       >
         {this.menuItems()}
-      </SelectField>
-    );
-
-    // Lets you compare the two 3D options side by side: the free vector-tilt
-    // "3D Buildings" view (needs a Map ID - see MAP_ID in Map.jsx, otherwise
-    // it just tilts the camera over whatever imagery is loaded) versus the
-    // separately-billed Photorealistic 3D Tiles view (needs the Map Tiles
-    // API enabled in Cloud Console - see Map.jsx for details).
-    const mapViewSelector = (
-      <SelectField
-        className="map-view-mode"
-        floatingLabelText="Map view (3D comparison)"
-        value={this.state.mapViewMode}
-        onChange={this.handleMapViewModeChange}
-      >
-        <MenuItem value="flat" primaryText="Standard (2D)" />
-        <MenuItem value="tilted" primaryText="3D Buildings (free)" />
-        <MenuItem value="photorealistic" primaryText="Photorealistic 3D (billed)" />
-      </SelectField>
-    );
-
-    const mapLanguageSelector = (
-      <SelectField
-        className="map-language"
-        floatingLabelText="Map language"
-        value={this.state.mapLanguage}
-        onChange={this.handleMapLanguageChange}
-      >
-        {MAP_LANGUAGES.map((lang) => (
-          <MenuItem key={lang.value} value={lang.value} primaryText={lang.label} />
-        ))}
       </SelectField>
     );
 
@@ -836,16 +858,33 @@ export default class HomePage extends React.Component {
             marked focused and nothing grabs focus. This menu is a settings
             panel containing real inputs, not a dropdown list, so it should
             never have been auto-focusing its first row anyway. */}
-        <Menu className="main-menu" disableAutoFocus>
+        {/* autoWidth={false} matters too: Menu otherwise measures its
+            children and writes an inline px width, which fought the width
+            declared in HomePage.scss and clipped the right-hand end of the
+            distance row. Width is CSS's job here. */}
+        <Menu className="main-menu" disableAutoFocus autoWidth={false}>
           {myProfilePlaceholder}
           {loginPlaceholder}
           {logoutPlaceholder}
-          {placesCategory}
-          {mapViewSelector}
-          {mapLanguageSelector}
-          <MenuItem primaryText={sliderDistance} />
-          {menuGeocoder}
-          <MenuItem primaryText="Help &amp; feedback" onClick={this.openHelp} />
+          <div className="menu-divider" />
+          <div className="menu-section">
+            {menuGeocoder}
+            {placesCategory}
+            {sliderDistance}
+          </div>
+          <div className="menu-divider" />
+          <MenuItem
+            className="menu-link"
+            primaryText="Settings"
+            leftIcon={<SettingsIcon />}
+            onClick={this.openSettings}
+          />
+          <MenuItem
+            className="menu-link"
+            primaryText="Help &amp; feedback"
+            leftIcon={<HelpIcon />}
+            onClick={this.openHelp}
+          />
         </Menu>
       </Paper>
     );
@@ -921,54 +960,89 @@ export default class HomePage extends React.Component {
         </div>
       );
 
-    const helpOverlay = this.state.helpVisible && (
-      <div
-        style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,.5)',
-          zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}
-        onClick={this.closeHelp}
-      >
-        <div
-          style={{
-            background: '#fff', maxWidth: 420, width: '90%', borderRadius: 8, padding: 24,
-            boxShadow: '0 4px 24px rgba(0,0,0,.3)', fontFamily: 'system-ui,-apple-system,Segoe UI,sans-serif',
-            color: '#222', maxHeight: '85vh', overflow: 'auto',
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h2 style={{ margin: 0, fontSize: 20 }}>About Karma Meter</h2>
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={this.closeHelp}
-              style={{ cursor: 'pointer', fontSize: 22, lineHeight: 1, color: '#888', padding: '0 4px' }}
-            >
+    // Both overlays share .overlay-backdrop / .overlay-card (see
+    // HomePage.scss) instead of the inline-style blocks these used to carry,
+    // so Help and Settings stay visually identical by construction.
+    const overlayCard = (title, onClose, body) => (
+      <div className="overlay-backdrop" onClick={onClose}>
+        <div className="overlay-card" onClick={(e) => e.stopPropagation()}>
+          <div className="overlay-head">
+            <h2>{title}</h2>
+            <button type="button" className="overlay-close" aria-label="Close" onClick={onClose}>
               &times;
-            </span>
+            </button>
           </div>
-          <p style={{ margin: '0 0 12px', fontSize: 14, lineHeight: 1.5 }}>
-            Karma Meter shows nearby places on the map, color-coded by their community rating, and lets you weigh in on them.
-          </p>
-          <ul style={{ margin: '0 0 16px', paddingLeft: 20, fontSize: 14, lineHeight: 1.7 }}>
-            <li>Markers are colored by rating: red (bad) through green (good), gray for no rating yet.</li>
-            <li>Hover a marker for a preview photo and a link to view it on Google Maps.</li>
-            <li>Click a marker to fix its karma &mdash; vote it up or down.</li>
-            <li>Use the category dropdown and distance slider to change what shows up nearby.</li>
-            <li>Type an address and press Enter to search a different location.</li>
-            <li>Tap the target button on the map to jump back to your current location.</li>
-            <li>Sign in with Google so your votes are attributed to your name.</li>
-          </ul>
-          <p style={{ margin: 0, fontSize: 14 }}>
-            Questions or feedback?{' '}
-            <a href="mailto:olturua@gmail.com?subject=Karma%20Meter%20feedback" style={{ color: '#2a78d6' }}>
-              olturua@gmail.com
-            </a>
-          </p>
+          {body}
         </div>
       </div>
     );
+
+    const helpOverlay = this.state.helpVisible && overlayCard('About Karma Meter', this.closeHelp, (
+      <div className="overlay-body">
+        <p>
+          Karma Meter shows nearby places on the map, color-coded by their community rating, and lets you weigh in on them.
+        </p>
+        <ul>
+          <li>Markers are colored by rating: red (bad) through green (good), gray for no rating yet.</li>
+          <li>Hover a marker for a preview photo and a link to view it on Google Maps.</li>
+          <li>Click a marker to fix its karma &mdash; vote it up or down.</li>
+          <li>Use the category dropdown and distance slider to change what shows up nearby.</li>
+          <li>Type an address and press Enter to search a different location.</li>
+          <li>Tap the target button on the map to jump back to your current location.</li>
+          <li>Zoom in far enough and the map tilts on its own to show 3D buildings.</li>
+          <li>Sign in with Google so your votes are attributed to your name.</li>
+        </ul>
+        <p>
+          Questions or feedback?{' '}
+          <a href="mailto:olturua@gmail.com?subject=Karma%20Meter%20feedback">
+            olturua@gmail.com
+          </a>
+        </p>
+      </div>
+    ));
+
+    const settingsOverlay = this.state.settingsVisible && overlayCard('Settings', this.closeSettings, (
+      <div className="overlay-body settings">
+        <h3>Map</h3>
+
+        <div className="setting">
+          <div className="setting-label">View</div>
+          {MAP_VIEW_MODES.map((mode) => (
+            <label className="choice" key={mode.value}>
+              <input
+                type="radio"
+                name="mapViewMode"
+                value={mode.value}
+                checked={this.state.mapViewMode === mode.value}
+                onChange={() => this.handleMapViewModeChange(mode.value)}
+              />
+              <span className="choice-text">
+                <span className="choice-label">{mode.label}</span>
+                <span className="choice-hint">{mode.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        <div className="setting">
+          <div className="setting-label" id="map-language-label">Language</div>
+          <select
+            className="setting-select"
+            aria-labelledby="map-language-label"
+            value={this.state.mapLanguage}
+            onChange={(e) => this.handleMapLanguageChange(e.target.value)}
+          >
+            {MAP_LANGUAGES.map((lang) => (
+              <option key={lang.value} value={lang.value}>{lang.label}</option>
+            ))}
+          </select>
+          <div className="setting-hint">
+            Changing this reloads the page &mdash; Google Maps only reads the
+            language when it first loads. Your location and search settings are kept.
+          </div>
+        </div>
+      </div>
+    ));
 
     const addPlaceDialogActions = [
       <Button key="cancel" onClick={this.closeAddPlaceForm}>Cancel</Button>,
@@ -1013,6 +1087,7 @@ export default class HomePage extends React.Component {
         <div>
           {menu}
           {helpOverlay}
+          {settingsOverlay}
           {addPlaceDialog}
           <Map
             ref={(elem) => { this.map = elem; }}

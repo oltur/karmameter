@@ -37,26 +37,59 @@
     // -35px (not -20px): must fully cover the 40px logo icon (was 28px when
     // -20px was tuned) so the open menu doesn't leave it peeking out above.
     margin: -35px 32px 16px 0;
-    .multiselect {
-      margin: 0 0 0 22px;
+    // Fixed width: the menu used to size itself to whatever its widest child
+    // happened to be, which with several 256px SelectFields inline made it
+    // sprawl and wrap unpredictably. Everything inside is full-width now, so
+    // one declared width governs the whole panel.
+    width: 300px;
+    max-width: calc(100vw - 20px);
+    border-radius: 10px;
+    overflow: hidden;
+    text-shadow: none;
+    color: #222;
+
+    .main-menu {
+      padding-bottom: 4px !important;
+      width: 100% !important;
+      box-sizing: border-box;
     }
+
+    // Groups the search controls into one padded block, so they read as a
+    // set rather than as three unrelated menu rows.
+    .menu-section {
+      padding: 2px 16px 10px;
+    }
+
+    .menu-divider {
+      height: 1px;
+      margin: 4px 0;
+      background: rgba(0, 0, 0, 0.09);
+    }
+
     .slider {
-      margin: 0 0 0 6px;
+      margin: 10px 0 0;
       .slider-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
         font-size: 12px;
         line-height: 1;
-        color: lightgrey;
+        // was `lightgrey` - too faint to read against white.
+        color: #777;
+        .slider-value {
+          font-weight: 600;
+          color: #2a78d6;
+        }
       }
       .slider-inner {
         line-height: 1;
+        margin: 6px 0 0 !important;
         div {
           margin-bottom: 0px !important;
         }
       }
     }
-    .geocoder {
-      margin: 0 0 0 22px;
-    }
+
     .login,
     .logout {
       button {
@@ -66,6 +99,134 @@
         padding: 0!important;
         font: inherit;
         cursor: pointer;
+      }
+    }
+  }
+}
+
+// Shared by the Help and Settings overlays so they can't drift apart.
+.overlay-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay-card {
+  background: #fff;
+  max-width: 420px;
+  width: 90%;
+  border-radius: 10px;
+  padding: 20px 24px 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #222;
+  max-height: 85vh;
+  overflow: auto;
+  text-shadow: none;
+
+  .overlay-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    h2 {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 600;
+    }
+  }
+
+  .overlay-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 24px;
+    line-height: 1;
+    color: #999;
+    padding: 0 2px;
+    &:hover { color: #333; }
+  }
+
+  .overlay-body {
+    font-size: 14px;
+    line-height: 1.55;
+    p { margin: 0 0 12px; }
+    ul { margin: 0 0 16px; padding-left: 20px; line-height: 1.7; }
+    a { color: #2a78d6; }
+  }
+
+  .settings {
+    h3 {
+      margin: 0 0 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #999;
+    }
+
+    .setting + .setting {
+      margin-top: 20px;
+    }
+
+    .setting-label {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    // Whole row is the hit target, not just the 13px radio dot.
+    .choice {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+      cursor: pointer;
+      & + .choice { margin-top: 8px; }
+      &:hover { background: rgba(42, 120, 214, 0.04); }
+      input { margin-top: 3px; }
+    }
+
+    .choice-text { display: block; }
+
+    .choice-label {
+      display: block;
+      font-size: 14px;
+    }
+
+    .choice-hint,
+    .setting-hint {
+      display: block;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #777;
+      margin-top: 2px;
+    }
+
+    .setting-hint { margin-top: 8px; }
+
+    .setting-select {
+      width: 100%;
+      padding: 9px 10px;
+      font-size: 14px;
+      font-family: inherit;
+      color: #222;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      cursor: pointer;
+      &:focus {
+        outline: none;
+        border-color: #2a78d6;
       }
     }
   }
