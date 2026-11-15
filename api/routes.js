@@ -98,10 +98,18 @@ module.exports = function (ctx) {
     // addresses are always re-created if deleted, which is deliberate: it
     // makes permanent lock-out impossible.
     Promise.all(INITIAL_ADMINS.map((email) => users.updateOne(
-        { _id: email },
-        { $setOnInsert: { email: email, isAdmin: true, addedBy: 'system', addedAt: new Date() } },
+        { email: email },
+        { $setOnInsert: { _id: email, email: email, isAdmin: true, addedBy: 'system', addedAt: new Date() } },
         { upsert: true }
     ))).catch((err) => console.log('seeding initial admins failed:', err.message))
+
+    // Records this app creates use the address as _id, but the collection
+    // predates that: rows left over from the original app have an ObjectID
+    // _id and carry the address only in `email`. Every lookup below is
+    // therefore keyed on `email`, never on _id - keying on _id made those
+    // legacy rows invisible, so deleting one answered "No such account".
+    users.createIndex({ email: 1 }, { unique: true })
+        .catch((err) => console.log('users email index not created:', err.message))
 
     // Verified Google tokens, so a burst of requests doesn't make one
     // round-trip to Google each. Tokens are short-lived anyway; this only
@@ -156,7 +164,7 @@ module.exports = function (ctx) {
             res.send(401, { message: 'Could not verify your Google sign-in.' })
             return null
         }
-        const user = await users.findOne({ _id: email })
+        const user = await users.findOne({ email: email })
         if (!user) {
             res.send(403, { message: 'This account is not authorized.' })
             return null
@@ -341,7 +349,7 @@ module.exports = function (ctx) {
             return
         }
         try {
-            const existing = await users.findOne({ _id: email })
+            const existing = await users.findOne({ email: email })
             if (existing) {
                 res.send(409, { message: 'That account is already on the list.' })
                 next()
@@ -378,7 +386,7 @@ module.exports = function (ctx) {
             // target actually IS an admin - otherwise demoting a normal
             // user, or touching an address that doesn't exist, wrongly
             // reported "there must be at least one admin".
-            const target = await users.findOne({ _id: email })
+            const target = await users.findOne({ email: email })
             if (!target) {
                 res.send(404, { message: 'No such account.' })
                 next()
@@ -390,7 +398,7 @@ module.exports = function (ctx) {
                 next()
                 return
             }
-            await users.updateOne({ _id: email }, { $set: { isAdmin: isAdmin } })
+            await users.updateOne({ email: email }, { $set: { isAdmin: isAdmin } })
             res.send(200, { email: email, isAdmin: isAdmin })
         } catch (err) {
             res.send(500, { message: err.message })
@@ -408,7 +416,7 @@ module.exports = function (ctx) {
             return
         }
         try {
-            const target = await users.findOne({ _id: email })
+            const target = await users.findOne({ email: email })
             if (!target) {
                 res.send(404, { message: 'No such account.' })
                 next()
@@ -419,7 +427,7 @@ module.exports = function (ctx) {
                 next()
                 return
             }
-            await users.deleteOne({ _id: email })
+            await users.deleteOne({ email: email })
             res.send(204)
         } catch (err) {
             res.send(500, { message: err.message })
