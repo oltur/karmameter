@@ -7,7 +7,12 @@
 # nginx (static files only, nginx just serves whatever's on disk).
 set -euo pipefail
 
-REMOTE="root@turevskiy.com"
+# Origin IP, not turevskiy.com: that hostname resolves to Cloudflare, whose
+# proxy forwards 80/443 but not port 22, so deploying by name fails with "No
+# route to host" while the site itself stays perfectly reachable. Verified as
+# the same machine - all three SSH host-key fingerprints match the ones
+# known_hosts holds for turevskiy.com.
+REMOTE="${KARMA_DEPLOY_HOST:-root@80.255.2.242}"
 REMOTE_FRONTEND="/var/www/html/karmameter.net"
 REMOTE_API="/var/www/html/karmameter.net.api"
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -74,8 +79,19 @@ echo "==> Verifying..."
 sleep 2
 curl -s -o /dev/null -w 'Frontend:          HTTP %{http_code}\n' https://karmameter.net
 curl -s -o /dev/null -w 'New bundle.js:     HTTP %{http_code}\n' "https://karmameter.net/$(basename "$JS_FILE")"
-curl -s -o /dev/null -w 'API /places:       HTTP %{http_code}\n' "https://karmameter.net/api/places?limit=1"
-curl -s -o /dev/null -w 'API /nearbySearch: HTTP %{http_code}\n' "https://karmameter.net/api/nearbySearch?lat=32.08&lng=34.78&radius=1000&type=restaurant"
+# 401 is the PASS here, not a failure: these routes now require a signed-in,
+# allow-listed account, so an unauthenticated probe getting 200 would mean
+# the guards had stopped working.
+check_requires_auth () {
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$2")"
+  if [ "$code" = "401" ]; then
+    echo "$1 HTTP $code (correctly requires sign-in)"
+  else
+    echo "$1 HTTP $code  <-- EXPECTED 401, auth guard may be broken"
+  fi
+}
+check_requires_auth 'API /places:      ' "https://karmameter.net/api/places?limit=1"
+check_requires_auth 'API /nearbySearch:' "https://karmameter.net/api/nearbySearch?lat=32.08&lng=34.78&radius=1000&type=restaurant"
 
 rm -rf "$STAGE"
 echo "==> Deploy complete. Backups: /root/backups/{frontend,api}-pre-deploy-$TS.tar.gz"
