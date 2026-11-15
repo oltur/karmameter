@@ -12,11 +12,11 @@ import AutoComplete from 'material-ui/AutoComplete';
 import Dialog from 'material-ui/Dialog';
 import Loader from 'react-loader-advanced';
 
-import Login from 'material-ui/svg-icons/action/flight-land';
 import Logout from 'material-ui/svg-icons/action/flight-takeoff';
 import Account from 'material-ui/svg-icons/action/account-box';
 import SettingsIcon from 'material-ui/svg-icons/action/settings';
 import HelpIcon from 'material-ui/svg-icons/action/help-outline';
+import AdminIcon from 'material-ui/svg-icons/action/supervisor-account';
 
 import Slider from 'material-ui/Slider';
 
@@ -73,10 +73,8 @@ const MAP_VIEW_MODES = [
   },
 ];
 
-// Only these Google accounts may actually sign in - anyone else's token is
-// fetched successfully (OAuth itself succeeds) but rejected client-side
-// before setCurrentUser ever runs.
-const ALLOWED_EMAILS = ['olturua@gmail.com', 'banderhelen@gmail.com'];
+// Where people are told to write to ask for access.
+const CONTACT_EMAIL = 'olturua@gmail.com';
 
 // Geolocation options shared by the initial-load and "go to current
 // location" lookups. No timeout was set here originally, which meant a
@@ -172,6 +170,17 @@ export default class HomePage extends React.Component {
       loaderPlace: null,
       helpVisible: false,
       settingsVisible: false,
+      // Access control. The app renders the welcome screen until
+      // currentUser is set, which only happens after the API's /me
+      // confirms the account is on the allow-list.
+      adminVisible: false,
+      authChecked: false,
+      authError: null,
+      adminUsers: [],
+      adminBusy: false,
+      adminError: null,
+      adminNewEmail: '',
+      adminNewIsAdmin: false,
       distance: prefs.distance || 1000,
       // Mirrors this.mapLanguage so the UI has something to bind to; the
       // authoritative copy is the instance field above.
@@ -234,6 +243,30 @@ export default class HomePage extends React.Component {
   componentDidMount() {
     this.updateWindowDimensions();
     window.HomePage = this;
+    window.addEventListener('resize', this.updateWindowDimensions);
+    document.addEventListener('keydown', this.keyDownHandler, false);
+    // Only Google Identity loads up front - Maps waits until someone has
+    // actually signed in, see loadGoogleMaps().
+    this.loadGoogleIdentityServices();
+  }
+
+  // Deliberately NOT called from componentDidMount: a visitor who isn't on
+  // the access list never sees a map, so there's no reason to pull the Maps
+  // bundle for them. (Billing for Dynamic Maps is triggered by constructing
+  // a google.maps.Map, which only happens behind sign-in, but not fetching
+  // the library at all keeps that unambiguous.)
+  loadGoogleMaps() {
+    // Already loaded - this is a sign-out followed by a sign-in, so the
+    // Map component has remounted as a fresh instance and just needs
+    // initialising; the script's callback won't fire a second time.
+    if (window.google && window.google.maps && window.google.maps.Map) {
+      this.initMap();
+      return;
+    }
+    if (this.mapsRequested) {
+      return;
+    }
+    this.mapsRequested = true;
     // v=beta + the maps3d library are required to make the Photorealistic
     // 3D Tiles element (<gmp-map-3d>) available at all - harmless to load
     // even when the "Photorealistic 3D" view is never selected, it only
@@ -244,9 +277,6 @@ export default class HomePage extends React.Component {
     // back to the visitor's browser language.
     const languageParam = this.mapLanguage === 'default' ? '' : `&language=${this.mapLanguage}`;
     loadJS(`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,maps3d,marker&v=beta&loading=async${languageParam}&callback=HomePage.initMap`);
-    window.addEventListener('resize', this.updateWindowDimensions);
-    document.addEventListener('keydown', this.keyDownHandler, false);
-    this.loadGoogleIdentityServices();
   }
 
   componentWillUnmount() {
@@ -326,30 +356,76 @@ export default class HomePage extends React.Component {
     if (!tokenResponse || !tokenResponse.access_token) {
       return;
     }
+    const token = tokenResponse.access_token;
+    // Hand the token to ApiService before anything else - /me, and every
+    // call after it, is authenticated with it.
+    ApiService.setAuthToken(token);
+
+    let profile = null;
     fetch('https://openidconnect.googleapis.com/v1/userinfo', {
-      headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+      headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.json())
       .then((info) => {
-        if (!info.email || !ALLOWED_EMAILS.includes(info.email.toLowerCase())) {
-          alert('This Google account is not authorized to sign in to Karma Meter.');
-          if (window.google && window.google.accounts && window.google.accounts.oauth2) {
-            window.google.accounts.oauth2.revoke(tokenResponse.access_token, () => {});
-          }
-          return;
-        }
-        this.setCurrentUser({
-          profileObj: {
-            googleId: info.sub,
-            imageUrl: info.picture,
-            email: info.email,
-            name: info.name,
-            givenName: info.given_name,
-            familyName: info.family_name,
+        profile = info;
+        // The ALLOW-LIST CHECK IS THE SERVER'S, not ours. /me returns 403
+        // for an address that isn't on it; doing it here as well would only
+        // be a UI convenience and could drift from what the API enforces.
+        return this.apiService.getMe();
+      })
+      .then((me) => {
+        this.setState((prevState) => ({
+          ...prevState,
+          authChecked: true,
+          currentUser: {
+            isAdmin: !!me.isAdmin,
+            profileObj: {
+              googleId: profile.sub,
+              imageUrl: profile.picture,
+              email: me.email || profile.email,
+              name: profile.name,
+              givenName: profile.given_name,
+              familyName: profile.family_name,
+            },
           },
+        }), () => {
+          // Render has now put the map element on the page, so the Maps
+          // library can load and initialise against it. initMap() then does
+          // the position lookup, which triggers the first places fetch.
+          this.loadGoogleMaps();
         });
       })
-      .catch(e => console.log('userinfo fetch failed', e));
+      .catch((err) => {
+        ApiService.setAuthToken(null);
+        if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+          window.google.accounts.oauth2.revoke(token, () => {});
+        }
+        this.setState((prevState) => ({
+          ...prevState,
+          currentUser: null,
+          authChecked: true,
+          authError: err && err.status === 403
+            ? `${(profile && profile.email) || 'That account'} is not on the access list.`
+            : 'Could not sign you in. Please try again.',
+        }));
+      });
+  }
+
+  // Dropped back to the welcome screen whenever the API rejects us - an
+  // expired token looks exactly like a revoked one from here.
+  handleAuthFailure(err) {
+    ApiService.setAuthToken(null);
+    this.setState((prevState) => ({
+      ...prevState,
+      currentUser: null,
+      places: [],
+      menuVisible: false,
+      adminVisible: false,
+      authChecked: true,
+      authError: (err && err.status === 403)
+        ? (err.message || 'This account is not authorized.')
+        : 'Your session expired. Please sign in again.',
+    }));
   }
 
   toogleMenu() {
@@ -379,7 +455,15 @@ export default class HomePage extends React.Component {
   }
 
   logoutGoogle() {
-    this.setCurrentUser(null);
+    ApiService.setAuthToken(null);
+    this.setState((prevState) => ({
+      ...prevState,
+      currentUser: null,
+      places: [],
+      menuVisible: false,
+      adminVisible: false,
+      authError: null,
+    }));
   }
 
   showOverlay(show, voteText = '', place = null) {
@@ -636,6 +720,12 @@ export default class HomePage extends React.Component {
   }
 
   retrievePlaces() {
+    // Signed out there is nothing to fetch, and /nearbySearch would answer
+    // 401 anyway - this also keeps the geolocation-driven first load from
+    // firing before sign-in.
+    if (!this.state.currentUser || !this.state.position) {
+      return;
+    }
     const request = {
       location: this.state.position,
       radius: this.state.distance,
@@ -643,15 +733,19 @@ export default class HomePage extends React.Component {
     };
 
     this.apiService.getNearbyPlaces(request).then((places) => {
-      this.setState({
-        ...this.state,
-        places,
-        placesVersion: this.state.placesVersion + 1,
-      }, () => {
+      this.setState((prevState) => ({
+        ...prevState,
+        places: Array.isArray(places) ? places : [],
+        placesVersion: prevState.placesVersion + 1,
+      }), () => {
         this.map.fillMarkers();
       });
     }, (err) => {
-      this.setState({ ...this.state, isLoaded: true, error: err });
+      if (err && err.name === 'AuthError') {
+        this.handleAuthFailure(err);
+        return;
+      }
+      this.setState((prevState) => ({ ...prevState, isLoaded: true, error: err }));
     });
   }
 
@@ -710,6 +804,72 @@ export default class HomePage extends React.Component {
 
   closeHelp = () => {
     this.setState((prevState) => ({ ...prevState, helpVisible: false }));
+  }
+
+  // --- Admin -------------------------------------------------------------
+  // Every one of these calls an admin-only endpoint; the server re-checks
+  // isAdmin on each, so hiding the menu item is presentation, not security.
+  openAdmin = () => {
+    this.setState(
+      (prevState) => ({ ...prevState, menuVisible: false, adminVisible: true, adminError: null }),
+      () => this.refreshAdminUsers(),
+    );
+  }
+
+  closeAdmin = () => {
+    this.setState((prevState) => ({ ...prevState, adminVisible: false }));
+  }
+
+  refreshAdminUsers() {
+    this.setState((prevState) => ({ ...prevState, adminBusy: true }));
+    this.apiService.listUsers()
+      .then((adminUsers) => {
+        this.setState((prevState) => ({
+          ...prevState, adminUsers, adminBusy: false, adminError: null,
+        }));
+      })
+      .catch((err) => this.handleAdminError(err));
+  }
+
+  handleAdminError(err) {
+    if (err && err.name === 'AuthError') {
+      this.handleAuthFailure(err);
+      return;
+    }
+    this.setState((prevState) => ({
+      ...prevState,
+      adminBusy: false,
+      adminError: (err && err.message) || 'Something went wrong.',
+    }));
+  }
+
+  addAdminUser = () => {
+    const email = this.state.adminNewEmail.trim().toLowerCase();
+    if (!email) {
+      return;
+    }
+    this.setState((prevState) => ({ ...prevState, adminBusy: true, adminError: null }));
+    this.apiService.addUser(email, this.state.adminNewIsAdmin)
+      .then(() => {
+        this.setState((prevState) => ({
+          ...prevState, adminNewEmail: '', adminNewIsAdmin: false,
+        }), () => this.refreshAdminUsers());
+      })
+      .catch((err) => this.handleAdminError(err));
+  }
+
+  toggleAdminFlag(email, isAdmin) {
+    this.setState((prevState) => ({ ...prevState, adminBusy: true, adminError: null }));
+    this.apiService.setUserAdmin(email, isAdmin)
+      .then(() => this.refreshAdminUsers())
+      .catch((err) => this.handleAdminError(err));
+  }
+
+  removeAdminUser(email) {
+    this.setState((prevState) => ({ ...prevState, adminBusy: true, adminError: null }));
+    this.apiService.removeUser(email)
+      .then(() => this.refreshAdminUsers())
+      .catch((err) => this.handleAdminError(err));
   }
 
   openSettings = () => {
@@ -782,24 +942,9 @@ export default class HomePage extends React.Component {
         <MenuItem ref={(elem) => { this.placeholderProfile = elem; }} primaryText="Anonymous" leftIcon={<Account />} />
       );
 
-    // Explicitly a plain text trigger, not Google's branded Sign-In button -
-    // see the comment on loadGoogleIdentityServices() for why.
-    const loginPlaceholder = !this.state.currentUser ?
-      (
-        <MenuItem
-          className="login"
-          ref={(elem) => { this.placeholderLoginGoogle = elem; }}
-          primaryText={(
-            <div
-              onClick={() => this.tokenClient && this.tokenClient.requestAccessToken()}
-              style={{ cursor: 'pointer' }}
-            >
-              Log in
-            </div>
-          )}
-          leftIcon={<Login />}
-        />
-      ) : null;
+    // No "Log in" row any more: the menu only exists once you're signed in
+    // (signed out renders the welcome screen instead), so it could never be
+    // shown. Sign-in lives on the welcome screen.
 
     const logoutPlaceholder = this.state.currentUser ?
       (
@@ -864,7 +1009,6 @@ export default class HomePage extends React.Component {
             distance row. Width is CSS's job here. */}
         <Menu className="main-menu" disableAutoFocus autoWidth={false}>
           {myProfilePlaceholder}
-          {loginPlaceholder}
           {logoutPlaceholder}
           <div className="menu-divider" />
           <div className="menu-section">
@@ -873,6 +1017,14 @@ export default class HomePage extends React.Component {
             {sliderDistance}
           </div>
           <div className="menu-divider" />
+          {this.state.currentUser && this.state.currentUser.isAdmin && (
+            <MenuItem
+              className="menu-link"
+              primaryText="Admin"
+              leftIcon={<AdminIcon />}
+              onClick={this.openAdmin}
+            />
+          )}
           <MenuItem
             className="menu-link"
             primaryText="Settings"
@@ -1044,6 +1196,89 @@ export default class HomePage extends React.Component {
       </div>
     ));
 
+    const adminOverlay = this.state.adminVisible && overlayCard('Admin', this.closeAdmin, (
+      <div className="overlay-body settings admin">
+        <h3>Who can use Karma Meter</h3>
+        <p className="admin-intro">
+          Everyone listed here can sign in. Admins can also change this list.
+        </p>
+
+        {this.state.adminError && <div className="admin-error">{this.state.adminError}</div>}
+
+        <ul className="admin-users">
+          {this.state.adminUsers.map((u) => {
+            const isSelf = this.state.currentUser &&
+              u.email === this.state.currentUser.profileObj.email;
+            return (
+              <li key={u.email}>
+                <div className="admin-user">
+                  <span className="admin-email">
+                    {u.email}
+                    {isSelf && <span className="admin-you">you</span>}
+                  </span>
+                  <label className="admin-toggle">
+                    <input
+                      type="checkbox"
+                      checked={u.isAdmin}
+                      disabled={this.state.adminBusy || isSelf}
+                      onChange={(e) => this.toggleAdminFlag(u.email, e.target.checked)}
+                    />
+                    Admin
+                  </label>
+                  <button
+                    type="button"
+                    className="admin-remove"
+                    disabled={this.state.adminBusy || isSelf}
+                    onClick={() => this.removeAdminUser(u.email)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="setting">
+          <div className="setting-label">Add an account</div>
+          <input
+            className="setting-select admin-input"
+            type="email"
+            placeholder="name@example.com"
+            value={this.state.adminNewEmail}
+            disabled={this.state.adminBusy}
+            onChange={(e) => {
+              const adminNewEmail = e.target.value;
+              this.setState((prevState) => ({ ...prevState, adminNewEmail }));
+            }}
+            onKeyDown={(e) => { if (e.keyCode === 13) { this.addAdminUser(); } }}
+          />
+          <label className="admin-toggle admin-new-admin">
+            <input
+              type="checkbox"
+              checked={this.state.adminNewIsAdmin}
+              disabled={this.state.adminBusy}
+              onChange={(e) => {
+                const adminNewIsAdmin = e.target.checked;
+                this.setState((prevState) => ({ ...prevState, adminNewIsAdmin }));
+              }}
+            />
+            Make them an admin
+          </label>
+          <Button
+            onClick={this.addAdminUser}
+            theme="green"
+            disabled={this.state.adminBusy || !this.state.adminNewEmail.trim()}
+          >
+            Add
+          </Button>
+          <div className="setting-hint">
+            You can&rsquo;t change or remove your own access here &mdash; ask another admin.
+          </div>
+        </div>
+      </div>
+    ));
+
     const addPlaceDialogActions = [
       <Button key="cancel" onClick={this.closeAddPlaceForm}>Cancel</Button>,
       <Button key="save" onClick={this.submitNewPlace} theme="green">Save</Button>,
@@ -1082,12 +1317,61 @@ export default class HomePage extends React.Component {
       </Dialog>
     );
 
+    // Signed out, the map is never rendered at all - so no Maps tiles, no
+    // markers and no billable API calls happen for a visitor who isn't on
+    // the list. (The API enforces the same thing independently.)
+    if (!this.state.currentUser) {
+      return (
+        <div className="welcome-screen">
+          <div className="welcome-card">
+            <div
+              className="welcome-logo"
+              dangerouslySetInnerHTML={{
+                __html: '<svg width="72" height="72" viewBox="0 0 40 40">' +
+                  '<circle cx="20" cy="20" r="19" fill="#2a78d6"/>' +
+                  '<text x="20" y="27.5" font-family="Arial,Helvetica,sans-serif" font-weight="900" ' +
+                  'font-size="23" fill="#fff" text-anchor="middle">K</text></svg>',
+              }}
+            />
+            <h1>Karma Meter</h1>
+            <p className="welcome-lead">
+              Rate the places around you, and see what everyone else thinks before you go.
+            </p>
+
+            {this.state.authError && <div className="welcome-error">{this.state.authError}</div>}
+
+            <Button
+              className="welcome-signin"
+              theme="blue"
+              onClick={() => this.tokenClient && this.tokenClient.requestAccessToken()}
+            >
+              Sign in with Google
+            </Button>
+
+            <div className="welcome-apply">
+              <h2>Need access?</h2>
+              <p>
+                Karma Meter is invite-only while it&rsquo;s small, so sign-in is limited to
+                approved Google accounts. To request one, email{' '}
+                <a href={`mailto:${CONTACT_EMAIL}?subject=Karma%20Meter%20access%20request`}>
+                  {CONTACT_EMAIL}
+                </a>{' '}
+                with the Google address you&rsquo;d like to use, and you&rsquo;ll be added to
+                the list.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     const result = (
       <Loader show={this.state.loaderVisible} message={loaderContent}>
         <div>
           {menu}
           {helpOverlay}
           {settingsOverlay}
+          {adminOverlay}
           {addPlaceDialog}
           <Map
             ref={(elem) => { this.map = elem; }}

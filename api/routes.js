@@ -83,6 +83,107 @@ module.exports = function (ctx) {
         console.log('photo cache dir not created:', err.message)
     }
 
+    // --- Accounts and authorisation -------------------------------------
+    // The allow-list used to live in a const in the FRONTEND bundle, which
+    // meant it decided what the UI showed and nothing else - every route
+    // here was reachable by anyone, including `DELETE /places`, which empties
+    // the collection. Membership now lives in this collection and is
+    // enforced server-side, because an admin screen that writes through an
+    // unauthenticated API would simply let anybody grant themselves access.
+    const users = db.collection('users')
+    const INITIAL_ADMINS = ['olturua@gmail.com', 'banderhelen@gmail.com']
+
+    // $setOnInsert, so a later edit by an admin (say, clearing isAdmin on one
+    // of these) is never undone by a restart. The flip side is that these two
+    // addresses are always re-created if deleted, which is deliberate: it
+    // makes permanent lock-out impossible.
+    Promise.all(INITIAL_ADMINS.map((email) => users.updateOne(
+        { _id: email },
+        { $setOnInsert: { email: email, isAdmin: true, addedBy: 'system', addedAt: new Date() } },
+        { upsert: true }
+    ))).catch((err) => console.log('seeding initial admins failed:', err.message))
+
+    // Verified Google tokens, so a burst of requests doesn't make one
+    // round-trip to Google each. Tokens are short-lived anyway; this only
+    // smooths out the repeats.
+    const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000
+    const TOKEN_CACHE_MAX = 500
+    const tokenCache = new Map()
+
+    // Google's real endpoint unless something deliberately overrides it.
+    // Overridable only so the authorisation rules below can be exercised
+    // against a local stub - anyone able to set this already has the server.
+    const USERINFO_URL = process.env.USERINFO_URL ||
+        'https://openidconnect.googleapis.com/v1/userinfo'
+
+    async function emailFromToken(token) {
+        const cached = tokenCache.get(token)
+        if (cached && cached.expires > Date.now()) {
+            return cached.email
+        }
+        const r = await axios.get(USERINFO_URL, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 8000
+        })
+        const email = ((r.data && r.data.email) || '').toLowerCase()
+        if (!email) {
+            return null
+        }
+        if (tokenCache.size >= TOKEN_CACHE_MAX) {
+            tokenCache.clear()
+        }
+        tokenCache.set(token, { email: email, expires: Date.now() + TOKEN_CACHE_TTL_MS })
+        return email
+    }
+
+    // Returns the user document, or null having ALREADY sent the response -
+    // so every caller is just `const actor = await requireUser(req, res); if
+    // (!actor) return;`, which is easy to audit at a glance.
+    async function requireUser(req, res) {
+        const match = /^Bearer\s+(.+)$/i.exec((req.header('authorization') || '').trim())
+        if (!match) {
+            res.send(401, { message: 'Sign in required.' })
+            return null
+        }
+        let email = null
+        try {
+            email = await emailFromToken(match[1])
+        } catch (err) {
+            res.send(401, { message: 'Could not verify your Google sign-in.' })
+            return null
+        }
+        if (!email) {
+            res.send(401, { message: 'Could not verify your Google sign-in.' })
+            return null
+        }
+        const user = await users.findOne({ _id: email })
+        if (!user) {
+            res.send(403, { message: 'This account is not authorized.' })
+            return null
+        }
+        return user
+    }
+
+    async function requireAdmin(req, res) {
+        const user = await requireUser(req, res)
+        if (!user) {
+            return null
+        }
+        if (!user.isAdmin) {
+            res.send(403, { message: 'Admins only.' })
+            return null
+        }
+        return user
+    }
+
+    function normaliseEmail(value) {
+        return typeof value === 'string' ? value.trim().toLowerCase() : ''
+    }
+
+    function isPlausibleEmail(value) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+    }
+
     function photoCacheKey(photoRef, maxwidth) {
         // Hashed, so the (attacker-supplied) reference can never influence
         // the path - the filename is always plain hex.
@@ -199,9 +300,139 @@ module.exports = function (ctx) {
     // });
 
     /**
+     * Who am I? The frontend calls this right after Google sign-in to learn
+     * whether the account is allowed in at all, and whether it's an admin.
+     * Returns 401/403 rather than a body when it isn't.
+     */
+    server.get('/me', async (req, res, next) => {
+        const actor = await requireUser(req, res)
+        if (!actor) { next(); return }
+        res.send(200, { email: actor.email, isAdmin: !!actor.isAdmin })
+        next()
+    })
+
+    /**
+     * Accounts - admin only, all four.
+     */
+    server.get('/users', async (req, res, next) => {
+        const actor = await requireAdmin(req, res)
+        if (!actor) { next(); return }
+        try {
+            const docs = await users.find({}).sort({ email: 1 }).toArray()
+            res.send(200, docs.map((u) => ({
+                email: u.email,
+                isAdmin: !!u.isAdmin,
+                addedBy: u.addedBy || null,
+                addedAt: u.addedAt || null
+            })))
+        } catch (err) {
+            res.send(500, { message: err.message })
+        }
+        next()
+    })
+
+    server.post('/users', async (req, res, next) => {
+        const actor = await requireAdmin(req, res)
+        if (!actor) { next(); return }
+        const email = normaliseEmail(req.body && req.body.email)
+        if (!isPlausibleEmail(email)) {
+            res.send(400, { message: 'A valid email address is required.' })
+            next()
+            return
+        }
+        try {
+            const existing = await users.findOne({ _id: email })
+            if (existing) {
+                res.send(409, { message: 'That account is already on the list.' })
+                next()
+                return
+            }
+            await users.insertOne({
+                _id: email,
+                email: email,
+                isAdmin: !!(req.body && req.body.isAdmin),
+                addedBy: actor.email,
+                addedAt: new Date()
+            })
+            res.send(201, { email: email, isAdmin: !!(req.body && req.body.isAdmin) })
+        } catch (err) {
+            res.send(500, { message: err.message })
+        }
+        next()
+    })
+
+    server.put('/users/:email', async (req, res, next) => {
+        const actor = await requireAdmin(req, res)
+        if (!actor) { next(); return }
+        const email = normaliseEmail(req.params.email)
+        const isAdmin = !!(req.body && req.body.isAdmin)
+        // Can't drop your own admin rights - an admin doing this by accident
+        // could leave nobody able to restore it.
+        if (email === actor.email && !isAdmin) {
+            res.send(400, { message: 'You cannot remove your own admin rights.' })
+            next()
+            return
+        }
+        try {
+            // Existence first, and only guard the admin count when the
+            // target actually IS an admin - otherwise demoting a normal
+            // user, or touching an address that doesn't exist, wrongly
+            // reported "there must be at least one admin".
+            const target = await users.findOne({ _id: email })
+            if (!target) {
+                res.send(404, { message: 'No such account.' })
+                next()
+                return
+            }
+            if (!isAdmin && target.isAdmin &&
+                (await users.countDocuments({ isAdmin: true })) <= 1) {
+                res.send(400, { message: 'There must be at least one admin.' })
+                next()
+                return
+            }
+            await users.updateOne({ _id: email }, { $set: { isAdmin: isAdmin } })
+            res.send(200, { email: email, isAdmin: isAdmin })
+        } catch (err) {
+            res.send(500, { message: err.message })
+        }
+        next()
+    })
+
+    server.del('/users/:email', async (req, res, next) => {
+        const actor = await requireAdmin(req, res)
+        if (!actor) { next(); return }
+        const email = normaliseEmail(req.params.email)
+        if (email === actor.email) {
+            res.send(400, { message: 'You cannot remove your own access.' })
+            next()
+            return
+        }
+        try {
+            const target = await users.findOne({ _id: email })
+            if (!target) {
+                res.send(404, { message: 'No such account.' })
+                next()
+                return
+            }
+            if (target.isAdmin && (await users.countDocuments({ isAdmin: true })) <= 1) {
+                res.send(400, { message: 'There must be at least one admin.' })
+                next()
+                return
+            }
+            await users.deleteOne({ _id: email })
+            res.send(204)
+        } catch (err) {
+            res.send(500, { message: err.message })
+        }
+        next()
+    })
+
+    /**
      * Create
      */
-    server.post('/places', (req, res, next) => {
+    server.post('/places', async (req, res, next) => {
+        const actor = await requireUser(req, res)
+        if (!actor) { next(); return }
 
         // extract data from body and add timestamps
         const data = Object.assign({}, req.body)
@@ -272,7 +503,9 @@ module.exports = function (ctx) {
      * Read
      * Example: http://localhost:3000/places?sortKey=city&sortOrder=asc&skip=0&limit=1000&$where=this.end_date>=ISODate('2014-01-01')%26%26this.start_date<=ISODate('2015-01-01')%26%26this.start_date<=this.end_date
      */
-    server.get('/places', (req, res, next) => {
+    server.get('/places', async (req, res, next) => {
+        const actor = await requireUser(req, res)
+        if (!actor) { next(); return }
 
         let limit = parseInt(req.query.limit, 10) || 10, // default limit to 10 docs
             skip = parseInt(req.query.skip, 10) || 0, // default skip to 0 docs
@@ -301,7 +534,9 @@ module.exports = function (ctx) {
     /**
      * Update
      */
-    server.put('/places/:id', (req, res, next) => {
+    server.put('/places/:id', async (req, res, next) => {
+        const actor = await requireUser(req, res)
+        if (!actor) { next(); return }
 
         // extract data from body and add timestamps
         const data = Object.assign({}, req.body)
@@ -318,7 +553,9 @@ module.exports = function (ctx) {
     /**
      * Delete
      */
-    server.del('/places/:id', (req, res, next) => {
+    server.del('/places/:id', async (req, res, next) => {
+        const actor = await requireAdmin(req, res)
+        if (!actor) { next(); return }
 
         // remove one document based on passed in id (via route)
         collection.findOneAndDelete({
@@ -334,7 +571,9 @@ module.exports = function (ctx) {
         /**
      * Delete all
      */
-    server.del('/places', (req, res, next) => {
+    server.del('/places', async (req, res, next) => {
+        const actor = await requireAdmin(req, res)
+        if (!actor) { next(); return }
 
         // remove all documents
         collection.remove({})
@@ -354,6 +593,11 @@ module.exports = function (ctx) {
         let radius = parseInt(req.query.radius) || 1000;
         let type = req.query.type || "restaurant";
         let googleQueried = false;
+
+        // Costs real money per call - never serve it to an unauthenticated
+        // caller.
+        const actor = await requireUser(req, res);
+        if (!actor) { next(); return }
 
         try {
             // Already asked Google about this area within the TTL - serve
@@ -419,7 +663,9 @@ module.exports = function (ctx) {
         }
    })
 
-   server.get('/elevation', (req, res, next) => {
+   server.get('/elevation', async (req, res, next) => {
+        const actor = await requireUser(req, res)
+        if (!actor) { next(); return }
         let location = {};
         location.lat = req.query.lat || 51;
         location.lng = req.query.lng || 7;

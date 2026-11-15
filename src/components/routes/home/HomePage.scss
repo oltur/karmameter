@@ -261,3 +261,167 @@
     }
   }
 }
+// Shown to anyone not signed in - the map is not rendered at all behind
+// this, so no Maps tiles or billable calls happen for a visitor who isn't
+// on the access list.
+.welcome-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: linear-gradient(160deg, #eef3fb 0%, #dfe8f6 100%);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #222;
+  text-shadow: none;
+  overflow: auto;
+}
+
+.welcome-card {
+  background: #fff;
+  width: 100%;
+  max-width: 440px;
+  border-radius: 14px;
+  padding: 36px 32px 30px;
+  box-shadow: 0 12px 44px rgba(20, 50, 100, 0.16);
+  text-align: center;
+
+  h1 {
+    margin: 14px 0 6px;
+    font-size: 26px;
+    font-weight: 700;
+  }
+
+  .welcome-lead {
+    margin: 0 0 22px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: #555;
+  }
+
+  .welcome-signin {
+    font-size: 15px;
+    padding: 11px 22px;
+  }
+
+  .welcome-error {
+    margin: 0 0 16px;
+    padding: 10px 12px;
+    border: 1px solid #d03b3b;
+    border-radius: 8px;
+    background: rgba(208, 59, 59, 0.06);
+    color: #b32d2d;
+    font-size: 13px;
+    line-height: 1.45;
+    text-align: left;
+  }
+
+  .welcome-apply {
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(0, 0, 0, 0.09);
+    text-align: left;
+
+    h2 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #999;
+    }
+
+    p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #444;
+    }
+
+    a { color: #2a78d6; }
+  }
+}
+
+// Admin overlay - extends the shared .overlay-card / .settings styles.
+.overlay-card .admin {
+  .admin-intro {
+    margin: -4px 0 14px;
+    font-size: 13px;
+    color: #777;
+  }
+
+  .admin-error {
+    margin-bottom: 12px;
+    padding: 9px 11px;
+    border: 1px solid #d03b3b;
+    border-radius: 8px;
+    background: rgba(208, 59, 59, 0.06);
+    color: #b32d2d;
+    font-size: 13px;
+  }
+
+  .admin-users {
+    list-style: none;
+    margin: 0 0 20px;
+    padding: 0;
+  }
+
+  .admin-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    margin-bottom: 8px;
+  }
+
+  .admin-email {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .admin-you {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: rgba(42, 120, 214, 0.12);
+    color: #2a78d6;
+    font-size: 11px;
+  }
+
+  .admin-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: #555;
+    cursor: pointer;
+    white-space: nowrap;
+    input:disabled { cursor: not-allowed; }
+  }
+
+  .admin-remove {
+    background: none;
+    border: 1px solid rgba(208, 59, 59, 0.4);
+    color: #b32d2d;
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 12px;
+    cursor: pointer;
+    &:hover:not(:disabled) { background: rgba(208, 59, 59, 0.07); }
+    &:disabled { opacity: 0.4; cursor: not-allowed; }
+  }
+
+  .admin-input { margin-bottom: 10px; }
+
+  .admin-new-admin { margin-bottom: 12px; }
+}
